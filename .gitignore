@@ -8,6 +8,8 @@ test-results/
 *.tsbuildinfo
 public/uploads/exams/
 public/uploads/materials/
+# Demo PDFs written by npm run db:seed-demo.
+public/uploads/demo/
 
 # Reliability run output (npm run reliability); one example report is kept.
 /reports/*

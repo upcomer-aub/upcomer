@@ -6,11 +6,14 @@ test("a student browses, searches and filters courses, then opens one", async ({
   const cards = page.locator("article");
   // Match a card by its code alone, since another course's name may mention the same code.
   const card = (code: string) => cards.filter({ has: page.getByText(code, { exact: true }) });
-  // An admin can add courses through /admin/catalog, so check for the seeded ones rather than an exact total.
+  // The catalog is paged in code order and an admin or the demo data can add many courses, so look each seeded one
+  // up by code rather than expecting it on the first page.
   for (const code of ["EECE330", "EECE350", "MATH201"]) {
+    await page.goto(`/?q=${code}`);
     await expect(card(code)).toHaveCount(1);
   }
 
+  await page.goto("/");
   await page.getByRole("searchbox", { name: "Search courses" }).fill("eece 350");
   await page.getByRole("button", { name: "Search" }).click();
   await expect(page).toHaveURL(/q=eece\+350/);

@@ -65,7 +65,8 @@ test("a new student completes the Sprint 1 critical journey", async ({ page }) =
     await page.getByRole("main").getByRole("link", { name: "Browse Courses" }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { name: "Browse Courses" })).toBeVisible();
-    await expect(page.locator("article").filter({ has: page.getByText("EECE350", { exact: true }) })).toHaveCount(1);
+    // The catalog is paged in code order, so EECE350 need not be on the first page; the search step finds it.
+    await expect(page.locator("article").first()).toBeVisible();
   });
 
   await test.step('Search for "eece 350"', async () => {

@@ -11,7 +11,8 @@ import { MAX_UPLOAD_BYTES } from "@/lib/upload-rules";
 import { getUploadOptions, parseUploadForm, saveUpload, validateUploadFile } from "@/lib/uploads";
 
 const pdf = new Uint8Array(Buffer.from("%PDF-1.4\nexample"));
-const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00]);
+// A ZIP signature plus the entry names a real Office document has (ZIP stores names uncompressed).
+const office = (folder: string) => new Uint8Array(Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(`[Content_Types].xml ${folder}/document.xml`)]));
 const input = { courseId: "course-a", category: "EXAM" as const, title: "Final Exam 2025", fileName: "final.pdf", bytes: pdf };
 
 const originalRoot = process.env.FILE_STORAGE_ROOT;
@@ -43,8 +44,8 @@ describe("upload file validation", () => {
   it.each([
     ["exam.pdf", pdf, "application/pdf"],
     ["EXAM.PDF", pdf, "application/pdf"],
-    ["notes.docx", zip, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-    ["slides.pptx", zip, "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    ["notes.docx", office("word"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["slides.pptx", office("ppt"), "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
     ["scan.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png"],
     ["scan.jpeg", new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
   ])("accepts %s", (name, bytes, mimeType) => {
@@ -63,6 +64,8 @@ describe("upload file validation", () => {
     ["exam.pdf", new Uint8Array(Buffer.from("<html>not a pdf</html>"))],
     ["exam.pdf", new Uint8Array(Buffer.from("%PD"))],
     ["notes.docx", pdf],
+    ["archive.docx", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])],
+    ["slides.pptx", office("word")],
     ["scan.png", new Uint8Array([0xff, 0xd8, 0xff, 0xe0])],
   ])("rejects corrupt or mislabelled content in %s", (name, bytes) => {
     expect(() => validateUploadFile(name, bytes)).toThrow(expect.objectContaining({ reason: "content_mismatch", status: 400 }));
@@ -140,7 +143,7 @@ describe("saving an upload", () => {
     course.findUnique.mockResolvedValueOnce(null);
     await expect(saveUpload(input)).rejects.toMatchObject({ reason: "course_not_found", status: 404 });
     courseProfessor.findUnique.mockResolvedValueOnce(null);
-    await expect(saveUpload({ ...input, professorId: "prof-b" })).rejects.toMatchObject({ reason: "professor_not_assigned", status: 400, message: "The selected professor doesn't teach the selected course." });
+    await expect(saveUpload({ ...input, professorId: "prof-b" })).rejects.toMatchObject({ reason: "professor_not_assigned", status: 404, message: "The selected professor doesn't teach the selected course." });
     expect(courseProfessor.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { courseId_professorId: { courseId: "course-a", professorId: "prof-b" } } }));
     term.findUnique.mockResolvedValueOnce(null);
     await expect(saveUpload({ ...input, termId: "ghost" })).rejects.toMatchObject({ reason: "term_not_found", status: 400 });

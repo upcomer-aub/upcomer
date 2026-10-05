@@ -12,8 +12,9 @@ import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, UPLOAD_FILE_TYPES, UPLOAD_TYPES_LAB
 const STATUS = {
   invalid_fields: 400, empty_file: 400, content_mismatch: 400,
   // The file metadata reasons shared with the admin edit page (US-72).
-  course_required: 400, invalid_year: 400, topic_too_long: 400, professor_not_assigned: 400, term_not_found: 400, invalid_type: 400, type_not_allowed: 400,
-  course_not_found: 404, file_too_large: 413, unsupported_type: 415,
+  course_required: 400, invalid_year: 400, topic_too_long: 400, term_not_found: 400, invalid_type: 400, type_not_allowed: 400,
+  // Sprint 1 plan: an unknown course or professor returns 404. A professor outside the course is unknown to it.
+  course_not_found: 404, professor_not_assigned: 404, file_too_large: 413, unsupported_type: 415,
   storage_failed: 500, record_failed: 500,
 } as const;
 
@@ -35,10 +36,21 @@ export function validateUploadFile(fileName: string, bytes: Uint8Array) {
   if (!type) throw new UploadError("unsupported_type", `Unsupported file type. Upload a ${UPLOAD_TYPES_LABEL} file.`);
   if (bytes.length === 0) throw new UploadError("empty_file", "The selected file is empty.");
   if (bytes.length > MAX_UPLOAD_BYTES) throw new UploadError("file_too_large", `The file is larger than ${MAX_UPLOAD_LABEL}.`);
-  if (!type.signature.every((byte, index) => bytes[index] === byte)) {
+  if (!type.signature.every((byte, index) => bytes[index] === byte) || !hasOfficeParts(extension, bytes)) {
     throw new UploadError("content_mismatch", `The file is corrupt or is not a real .${extension} file.`);
   }
   return { extension, mimeType: type.mimeType };
+}
+
+// DOCX and PPTX are ZIP files, so the ZIP signature alone also accepts any renamed archive. ZIP stores entry
+// names uncompressed, so a real document always contains these names as plain bytes.
+const OFFICE_PARTS: Record<string, string[]> = { docx: ["[Content_Types].xml", "word/"], pptx: ["[Content_Types].xml", "ppt/"] };
+
+function hasOfficeParts(extension: string, bytes: Uint8Array) {
+  const parts = OFFICE_PARTS[extension];
+  if (!parts) return true;
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return parts.every(part => buffer.includes(part, 0, "latin1"));
 }
 
 function text(form: FormData, name: string, label: string, maxLength: number) {

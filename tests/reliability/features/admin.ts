@@ -107,7 +107,7 @@ export const uploadFeature: Feature = {
     refusedUpload("unknown course", "a valid PDF for a course that does not exist", 404, "course_not_found", async (ctx, fields) => ({
       fields: { ...fields, courseId: `${ctx.stamp.toLowerCase()}-no-course`, professorId: undefined }, file: pdf(ctx),
     })),
-    refusedUpload("professor not teaching", "a valid PDF tagged with a professor who doesn't teach the course", 400, "professor_not_assigned", async (ctx, fields) => ({
+    refusedUpload("professor not teaching", "a valid PDF tagged with a professor who doesn't teach the course", 404, "professor_not_assigned", async (ctx, fields) => ({
       fields: { ...fields, professorId: await professorNotTeaching(ctx, fields.courseId) }, file: pdf(ctx),
     })),
     refusedUpload("non-admin", "a valid PDF from a student or a visitor", 403, "forbidden", async (ctx, fields) => ({ fields, file: pdf(ctx), client: (await deniedCaller(ctx)).client })),

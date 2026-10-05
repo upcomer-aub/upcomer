@@ -7,18 +7,40 @@ export const runtime = "nodejs";
 
 // Room for the text fields and multipart boundaries around the file itself.
 const FORM_OVERHEAD_BYTES = 1024 * 1024;
+const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + FORM_OVERHEAD_BYTES;
 
 const failure = (reason: string, error: string, status: number) => Response.json({ reason, error }, { status });
+const tooLarge = () => {
+  logError("upload_rejected", { reason: "file_too_large" });
+  return failure("file_too_large", `The file is larger than ${MAX_UPLOAD_LABEL}.`, 413);
+};
+
+// Reads the body itself and stops at the limit, so a request without Content-Length (or with a false one)
+// can't make the server hold more than MAX_REQUEST_BYTES. Returns null when the body is too large.
+async function readForm(request: Request): Promise<FormData | null> {
+  if (!request.body) throw new TypeError("No request body");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    total += chunk.value.byteLength;
+    if (total > MAX_REQUEST_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(chunk.value);
+  }
+  return new Response(Buffer.concat(chunks), { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData();
+}
 
 export async function POST(request: Request) {
   if (!(await getAdminUser("POST /api/admin/uploads"))) return failure("forbidden", "Only an admin can upload files.", 403);
-  if (Number(request.headers.get("content-length")) > MAX_UPLOAD_BYTES + FORM_OVERHEAD_BYTES) {
-    logError("upload_rejected", { reason: "file_too_large" });
-    return failure("file_too_large", `The file is larger than ${MAX_UPLOAD_LABEL}.`, 413);
-  }
+  if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) return tooLarge();
   let form: FormData;
   try {
-    form = await request.formData();
+    const parsed = await readForm(request);
+    if (!parsed) return tooLarge();
+    form = parsed;
   } catch {
     logError("upload_rejected", { reason: "invalid_form" });
     return failure("invalid_form", "The upload could not be read. Please try again.", 400);

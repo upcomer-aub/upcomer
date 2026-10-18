@@ -167,6 +167,7 @@ model CourseFile {
   // When an admin published or rejected the submission.
   reviewedAt       DateTime?
   questions        Question[]
+  processingRuns   FileProcessingRun[]
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -174,6 +175,30 @@ model CourseFile {
   @@index([termId])
   @@index([status, createdAt])
   @@index([submittedById])
+}
+
+enum ProcessingStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum ProcessingStage {
+  EXTRACTION
+  GROUPING
+}
+
+model FileProcessingRun {
+  id        String           @id @default(cuid())
+  fileId    String
+  file      CourseFile       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  status    ProcessingStatus @default(RUNNING)
+  stage     ProcessingStage  @default(EXTRACTION)
+  reason    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([fileId, createdAt])
 }
 
 enum LogLevel {

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const { requestPasswordReset, resetPassword, checkResetToken, redirect } = vi.hoisted(() => ({
+const { requestPasswordReset, resetPassword, checkResetToken, redirect, after } = vi.hoisted(() => ({
   requestPasswordReset: vi.fn(), resetPassword: vi.fn(), checkResetToken: vi.fn(),
   redirect: vi.fn((to: string) => { throw new Error(`NEXT_REDIRECT ${to}`); }),
+  after: vi.fn(),
 }));
 vi.mock("@/lib/password-reset", async original => ({ ...(await original<typeof import("@/lib/password-reset")>()), requestPasswordReset, resetPassword, checkResetToken }));
 vi.mock("next/navigation", () => ({ redirect, notFound: vi.fn() }));
+vi.mock("next/server", () => ({ after }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 import ForgotPasswordPage from "@/app/forgot-password/page";
 import ResetPasswordPage, { metadata } from "@/app/reset-password/page";
@@ -22,7 +24,7 @@ const form = (fields: Record<string, string>) => {
 const reset = (params: Record<string, string> = {}) => ResetPasswordPage({ searchParams: Promise.resolve(params) });
 
 beforeEach(() => {
-  for (const mock of [requestPasswordReset, resetPassword, checkResetToken, redirect]) mock.mockClear();
+  for (const mock of [requestPasswordReset, resetPassword, checkResetToken, redirect, after]) mock.mockClear();
   requestPasswordReset.mockResolvedValue(undefined);
   checkResetToken.mockResolvedValue({ ok: true, tokenId: "token-1", userId: "user-a" });
 });
@@ -43,7 +45,12 @@ describe("forgot password (acceptance tests 1 and 3)", () => {
   it("always redirects to the same page, whatever the email", async () => {
     for (const email of ["lina@mail.aub.edu", "nobody@mail.aub.edu", ""]) {
       await expect(requestResetAction(form({ email }))).rejects.toThrow("NEXT_REDIRECT /forgot-password?sent=1");
+      expect(after).toHaveBeenCalledOnce();
+      expect(requestPasswordReset).not.toHaveBeenCalled();
+      await after.mock.calls[0][0]();
       expect(requestPasswordReset).toHaveBeenLastCalledWith(email);
+      after.mockClear();
+      requestPasswordReset.mockClear();
     }
   });
 });

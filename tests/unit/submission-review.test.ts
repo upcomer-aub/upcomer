@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { courseFile, rebuildQuestionBank, requireAdmin, redirect } = vi.hoisted(() => ({
+const { courseFile, processExamFile, requireAdmin, redirect } = vi.hoisted(() => ({
   courseFile: { count: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-  rebuildQuestionBank: vi.fn(),
+  processExamFile: vi.fn(),
   requireAdmin: vi.fn(),
   redirect: vi.fn((location: string) => { throw new Error(`NEXT_REDIRECT ${location}`); }),
 }));
 vi.mock("@/lib/db", () => ({ db: { courseFile } }));
-vi.mock("@/lib/question-bank", () => ({ rebuildQuestionBank }));
+vi.mock("@/lib/exam-processing", () => ({ processExamFile }));
 vi.mock("@/lib/auth", () => ({ requireAdmin }));
 vi.mock("next/navigation", () => ({ redirect }));
 import { publishSubmissionAction, rejectSubmissionAction } from "@/lib/submission-review-actions";
@@ -35,7 +35,7 @@ beforeEach(() => {
   courseFile.findMany.mockReset().mockResolvedValue([]);
   courseFile.findUnique.mockReset().mockResolvedValue({ id: "file-a", courseId: "course-a", category: "EXAM" });
   courseFile.updateMany.mockReset().mockResolvedValue({ count: 1 });
-  rebuildQuestionBank.mockReset().mockResolvedValue({ ok: true, groupCount: 1, questionCount: 3 });
+  processExamFile.mockReset().mockResolvedValue({ ok: true });
   requireAdmin.mockReset().mockResolvedValue({ id: "admin-1", role: "ADMIN" });
   redirect.mockClear();
 });
@@ -80,13 +80,13 @@ describe("reviewing a submission", () => {
   it("publishes, regroups the exam's course, and records which admin did it", async () => {
     expect(await reviewSubmission("admin-1", "publish", "file-a")).toEqual({ ok: true });
     expect(courseFile.updateMany).toHaveBeenCalledWith({ where: { id: "file-a", status: "PENDING" }, data: expect.objectContaining({ status: "PUBLISHED" }) });
-    expect(rebuildQuestionBank).toHaveBeenCalledWith("course-a");
+    expect(processExamFile).toHaveBeenCalledWith("file-a");
     expect(logged()).toContainEqual(expect.objectContaining({ event: "submission_reviewed", level: "info", fileId: "file-a", courseId: "course-a", operation: "publish", userId: "admin-1" }));
   });
   it("rejects with the trimmed reason and never logs it", async () => {
     expect(await reviewSubmission("admin-1", "reject", "file-a", "  Wrong course: this is EECE 351  ")).toEqual({ ok: true });
     expect(courseFile.updateMany).toHaveBeenCalledWith({ where: { id: "file-a", status: "PENDING" }, data: expect.objectContaining({ status: "REJECTED", rejectionReason: "Wrong course: this is EECE 351" }) });
-    expect(rebuildQuestionBank).not.toHaveBeenCalled();
+    expect(processExamFile).not.toHaveBeenCalled();
     expect(JSON.stringify(logged())).not.toContain("Wrong course");
   });
   it("logs each refusal with its reason and returns it", async () => {

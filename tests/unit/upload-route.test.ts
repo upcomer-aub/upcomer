@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { saveUpload, getAdminUser } = vi.hoisted(() => ({ saveUpload: vi.fn(), getAdminUser: vi.fn() }));
+const { saveUpload, getAdminUser, processExamFile } = vi.hoisted(() => ({ saveUpload: vi.fn(), getAdminUser: vi.fn(), processExamFile: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/auth", () => ({ getAdminUser }));
 vi.mock("@/lib/uploads", async original => ({ ...(await original<typeof import("@/lib/uploads")>()), saveUpload }));
+vi.mock("@/lib/exam-processing", () => ({ processExamFile }));
 import { POST } from "@/app/api/admin/uploads/route";
 import { UploadError } from "@/lib/uploads";
 
@@ -21,6 +22,7 @@ beforeEach(() => {
   errors = vi.spyOn(console, "error").mockImplementation(() => {});
   getAdminUser.mockReset().mockResolvedValue({ id: "admin-1", role: "ADMIN" });
   saveUpload.mockReset().mockResolvedValue({ id: "file new", title: "Final Exam", category: "EXAM", courseId: "course-a" });
+  processExamFile.mockReset().mockResolvedValue({ ok: true });
 });
 afterEach(() => errors.mockRestore());
 
@@ -45,7 +47,15 @@ describe("admin upload route", () => {
     const input = saveUpload.mock.calls[0][0];
     expect(input).toMatchObject({ courseId: "course-a", category: "EXAM", title: "Final Exam", year: 2025, termId: "term-fall", examType: "FINAL", fileName: "final.pdf" });
     expect(Buffer.from(input.bytes)).toEqual(pdf);
+    expect(processExamFile).toHaveBeenCalledWith("file new");
     expect(errors).not.toHaveBeenCalled();
+  });
+  it("keeps an uploaded exam when extraction fails, so an admin can retry it", async () => {
+    processExamFile.mockResolvedValue({ ok: false, reason: "no_text" });
+    const response = await POST(upload());
+    expect(response.status).toBe(201);
+    expect((await response.json()).file.id).toBe("file new");
+    expect(processExamFile).toHaveBeenCalledWith("file new");
   });
   it("rejects missing fields without saving", async () => {
     const response = await POST(upload({ title: "" }));

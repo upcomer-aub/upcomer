@@ -58,6 +58,8 @@ jobs:
       # Test-only admin for the seed and the admin e2e tests; the database is discarded after every run.
       ADMIN_EMAIL: ci-admin@mail.aub.edu
       ADMIN_PASSWORD: ci-only-password
+      # The server under test builds password reset links from this address (US-03).
+      APP_URL: http://127.0.0.1:3000
       # Makes Playwright build and start a fresh server instead of reusing one, and turns on the HTML report.
       CI: "true"
     steps:

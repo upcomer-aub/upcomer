@@ -96,6 +96,45 @@ export function groupQuestions(questions: SourceQuestion[]): GroupedQuestions[] 
   return groups;
 }
 
+// Admin corrections (question corrections) on top of the automatic grouping. A question pinned to another one joins the group
+// that question ends up in, wherever its text would put it; a split question gets a group of its own that nothing else joins.
+// A pin to a question that is gone (deleted, or its paper moved to another course) or a loop of pins counts as no pin.
+export type CorrectedQuestion = SourceQuestion & { pinnedToQuestionId?: string | null; splitOut?: boolean };
+
+// The group key of a split question. Grouping keys never contain ":" (it is removed as punctuation), so this one is unique.
+export const splitGroupKey = (normalizedText: string, questionId: string) => `${normalizedText} #split:${questionId}`;
+
+export function groupCorrectedQuestions(questions: CorrectedQuestion[]): GroupedQuestions[] {
+  const byId = new Map(questions.map(question => [question.id, question]));
+  const keyOf = (question: CorrectedQuestion) => normalizeQuestionText(question.text);
+  // The question a pin chain ends at: a split question, an unpinned one, or the last one before a missing anchor or a loop.
+  const rootOf = (question: CorrectedQuestion) => {
+    const seen = new Set<string>();
+    let current = question;
+    while (!current.splitOut && current.pinnedToQuestionId) {
+      seen.add(current.id);
+      const next = byId.get(current.pinnedToQuestionId);
+      if (!next) break;
+      if (seen.has(next.id)) return question;
+      current = next;
+    }
+    return current;
+  };
+  const roots = new Map(questions.map(question => [question.id, rootOf(question)]));
+  // A pin whose root has no group (no text left after cleaning) is ignored, so the question is grouped by its own text.
+  const followsPin = (question: CorrectedQuestion) => !question.splitOut && roots.get(question.id) !== question && Boolean(keyOf(roots.get(question.id)!));
+  const split = questions.filter(question => question.splitOut);
+  const pinned = questions.filter(followsPin);
+  const groups = groupQuestions(questions.filter(question => !question.splitOut && !followsPin(question)));
+  for (const question of [...split].sort(byPaperThenPosition)) {
+    const key = keyOf(question);
+    if (key) groups.push({ normalizedText: splitGroupKey(key, question.id), text: cleanQuestionText(question.text), questions: [question] });
+  }
+  const groupOf = new Map(groups.flatMap(group => group.questions.map(question => [question.id, group] as const)));
+  for (const question of [...pinned].sort(byPaperThenPosition)) groupOf.get(roots.get(question.id)!.id)?.questions.push(question);
+  return groups;
+}
+
 // Most papers first; ties go to the question seen most recently, then to the text, so the order never depends on input order.
 export function rankGroups(groups: GroupedQuestions[]): RankedGroup[] {
   return groups

@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findCourse: vi.fn(), findCourses: vi.fn(), findQuestions: vi.fn(), updateQuestions: vi.fn(), findGroups: vi.fn(),
-  deleteGroups: vi.fn(), upsertGroup: vi.fn(), countFiles: vi.fn(), findFiles: vi.fn(), executeRaw: vi.fn(), transaction: vi.fn(), logError: vi.fn(),
+  deleteGroups: vi.fn(), existingGroups: vi.fn(), createGroups: vi.fn(), updateGroup: vi.fn(), countFiles: vi.fn(), findFiles: vi.fn(), executeRaw: vi.fn(), transaction: vi.fn(), logError: vi.fn(),
 }));
 const tx = {
   $executeRaw: mocks.executeRaw,
   question: { findMany: mocks.findQuestions, updateMany: mocks.updateQuestions },
-  questionGroup: { deleteMany: mocks.deleteGroups, upsert: mocks.upsertGroup },
+  questionGroup: { deleteMany: mocks.deleteGroups, findMany: mocks.existingGroups, createManyAndReturn: mocks.createGroups, update: mocks.updateGroup },
 };
 vi.mock("@/lib/db", () => ({ db: {
   course: { findUnique: mocks.findCourse, findMany: mocks.findCourses },
@@ -23,39 +23,56 @@ const failure = (name: string) => Object.assign(new Error("database is down"), {
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.transaction.mockImplementation((work: (client: typeof tx) => unknown) => work(tx));
-  mocks.upsertGroup.mockImplementation(({ where }) => Promise.resolve({ id: `group-${where.courseId_normalizedText.normalizedText}` }));
+  mocks.existingGroups.mockResolvedValue([]);
+  mocks.createGroups.mockImplementation(({ data }) => Promise.resolve(data.map(({ normalizedText }: { normalizedText: string }) => ({ id: `group-${normalizedText}`, normalizedText }))));
 });
 
 describe("rebuildQuestionBank", () => {
   const stored = [
-    { id: "q1", fileId: "paper-2024", number: 1, text: "Define a socket.", file: { year: 2024 } },
-    { id: "q2", fileId: "paper-2025", number: 3, text: "define a SOCKET", file: { year: 2025 } },
-    { id: "q3", fileId: "paper-2025", number: 1, text: "Explain ARP.", file: { year: 2025 } },
-    { id: "q4", fileId: "paper-2025", number: 2, text: "Q2.", file: { year: 2025 } },
+    { id: "q1", fileId: "paper-2024", number: 1, text: "Define a socket.", groupId: null, file: { year: 2024 } },
+    { id: "q2", fileId: "paper-2025", number: 3, text: "define a SOCKET", groupId: null, file: { year: 2025 } },
+    { id: "q3", fileId: "paper-2025", number: 1, text: "Explain ARP.", groupId: null, file: { year: 2025 } },
+    { id: "q4", fileId: "paper-2025", number: 2, text: "Q2.", groupId: "group-old", file: { year: 2025 } },
   ];
 
   it("groups and ranks the course's exam questions under a per-course lock", async () => {
     mocks.findCourse.mockResolvedValue({ id: "course-a" });
     mocks.findQuestions.mockResolvedValue(stored);
     expect(await rebuildQuestionBank("course-a")).toEqual({ ok: true, groupCount: 2, questionCount: 4 });
-    expect(mocks.executeRaw).toHaveBeenCalledTimes(1);
     expect(mocks.executeRaw.mock.calls[0].slice(1)).toEqual(["course-a"]);
     expect(mocks.findQuestions).toHaveBeenCalledWith(expect.objectContaining({ where: { file: { courseId: "course-a", category: "EXAM", status: "PUBLISHED" } } }));
     expect(mocks.deleteGroups).toHaveBeenCalledWith({ where: { courseId: "course-a", normalizedText: { notIn: ["define a socket", "explain arp"] } } });
-    expect(mocks.upsertGroup.mock.calls.map(([call]) => [call.where.courseId_normalizedText.normalizedText, call.update])).toEqual([
-      ["define a socket", { text: "Define a socket.", paperCount: 2, rank: 1 }],
-      ["explain arp", { text: "Explain ARP.", paperCount: 1, rank: 2 }],
-    ]);
-    expect(mocks.updateQuestions).toHaveBeenCalledWith({ where: { id: { in: ["q1", "q2"] } }, data: { groupId: "group-define a socket" } });
-    expect(mocks.updateQuestions).toHaveBeenCalledWith({ where: { id: { in: ["q3"] } }, data: { groupId: "group-explain arp" } });
+    expect(mocks.createGroups).toHaveBeenCalledWith(expect.objectContaining({ data: [
+      { courseId: "course-a", normalizedText: "define a socket", text: "Define a socket.", paperCount: 2, rank: 1 },
+      { courseId: "course-a", normalizedText: "explain arp", text: "Explain ARP.", paperCount: 1, rank: 2 },
+    ] }));
+    // One statement assigns every question its group.
+    expect(mocks.executeRaw).toHaveBeenCalledTimes(2);
+    expect(mocks.executeRaw.mock.calls[1].slice(1)).toEqual([["q1", "q2", "q3"], ["group-define a socket", "group-define a socket", "group-explain arp"]]);
+    expect(mocks.updateQuestions).toHaveBeenCalledTimes(1);
     expect(mocks.updateQuestions).toHaveBeenCalledWith({ where: { id: { in: ["q4"] } }, data: { groupId: null } });
+  });
+
+  it("keeps existing groups' IDs and writes only what changed", async () => {
+    mocks.findCourse.mockResolvedValue({ id: "course-a" });
+    mocks.findQuestions.mockResolvedValue(stored.map(question => ({ ...question, groupId: question.id === "q4" ? null : question.id === "q3" ? "g-arp" : "g-socket" })));
+    mocks.existingGroups.mockResolvedValue([
+      { id: "g-socket", normalizedText: "define a socket", text: "Define a socket.", paperCount: 2, rank: 1 },
+      { id: "g-arp", normalizedText: "explain arp", text: "Explain ARP.", paperCount: 1, rank: 3 },
+    ]);
+    expect(await rebuildQuestionBank("course-a")).toEqual({ ok: true, groupCount: 2, questionCount: 4 });
+    expect(mocks.createGroups).not.toHaveBeenCalled();
+    expect(mocks.updateGroup).toHaveBeenCalledTimes(1);
+    expect(mocks.updateGroup).toHaveBeenCalledWith({ where: { id: "g-arp" }, data: { text: "Explain ARP.", paperCount: 1, rank: 2 } });
+    expect(mocks.executeRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.updateQuestions).not.toHaveBeenCalled();
   });
   it("removes every group of a course that has no questions left", async () => {
     mocks.findCourse.mockResolvedValue({ id: "course-a" });
     mocks.findQuestions.mockResolvedValue([]);
     expect(await rebuildQuestionBank("course-a")).toEqual({ ok: true, groupCount: 0, questionCount: 0 });
     expect(mocks.deleteGroups).toHaveBeenCalledWith({ where: { courseId: "course-a", normalizedText: { notIn: [] } } });
-    expect(mocks.upsertGroup).not.toHaveBeenCalled();
+    expect(mocks.createGroups).not.toHaveBeenCalled();
     expect(mocks.updateQuestions).not.toHaveBeenCalled();
   });
   it("refuses an unknown course and logs the reason", async () => {

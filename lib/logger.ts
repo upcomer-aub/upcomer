@@ -52,7 +52,13 @@ type LogEvent =
   | "slow_operation"
   | "submission_reviewed"
   | "submission_review_refused"
-  | "submission_review_rate_limited";
+  | "submission_review_rate_limited"
+  | "exam_processing_failed"
+  | "question_corrected"
+  | "question_correction_refused"
+  | "question_correction_rate_limited"
+  | "question_correction_failed"
+  | "question_correction_retrieval_failed";
 
 export type { LogEvent };
 export type LogLevel = "error" | "warn" | "info";
@@ -126,6 +132,13 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   submission_reviewed: "info",
   submission_review_refused: "warn",
   submission_review_rate_limited: "warn",
+  exam_processing_failed: "error",
+  // Question corrections: admins fix extracted or grouped questions (who corrected is in userId; question text is never logged)
+  question_corrected: "info",
+  question_correction_refused: "warn",
+  question_correction_rate_limited: "warn",
+  question_correction_failed: "error",
+  question_correction_retrieval_failed: "error",
 };
 
 // A refusal event that was caused by the database failing is a real failure, so it is raised to error.

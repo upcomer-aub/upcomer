@@ -58,5 +58,6 @@ export function UploadForm({ category, courses, terms, initialCourseId = "" }: {
     {status.state === "done" && <p className="form-success" role="status">
       Uploaded “{status.file.title}”. <a href={status.file.url} target="_blank" rel="noopener noreferrer">Open Original File</a> · <Link href={`/courses/${status.file.courseId}/${isExam ? "exams" : "materials"}`}>View course {noun}s</Link>
     </p>}
+    {status.state === "done" && isExam && <p><Link href="/admin/processing">Check exam processing status</Link></p>}
   </form>;
 }

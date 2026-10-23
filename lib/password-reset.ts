@@ -36,8 +36,7 @@ function resetEmail(link: string) {
   ].join("\n");
 }
 
-// Always resolves without saying whether the email is registered. The email is sent in the background, so a registered
-// email does not answer noticeably later than an unknown one.
+// Always resolves without saying whether the email is registered.
 export async function requestPasswordReset(email: string, { now = new Date(), send = sendMail as Send } = {}): Promise<void> {
   const address = normalizeEmail(email);
   try {
@@ -66,11 +65,13 @@ export async function requestPasswordReset(email: string, { now = new Date(), se
         select: { id: true },
       });
     });
-    logError("password_reset_requested", { outcome: "sent", userId: user.id, resetLinkId: created.id });
     const link = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
-    void send({ to: user.email, subject: "Reset your Upcomer password", text: resetEmail(link) }).catch(error => {
+    try {
+      await send({ to: user.email, subject: "Reset your Upcomer password", text: resetEmail(link) });
+      logError("password_reset_requested", { outcome: "sent", userId: user.id, resetLinkId: created.id });
+    } catch (error) {
       logError("password_reset_email_failed", { userId: user.id, reason: error instanceof MailError ? error.reason : "send_failed", errorType: errorType(error) });
-    });
+    }
   } catch (error) {
     logError("password_reset_failed", { stage: "request", errorType: errorType(error), errorCode: errorCode(error) });
   }

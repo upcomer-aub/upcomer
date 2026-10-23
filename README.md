@@ -59,6 +59,9 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/admin/files/:id` | Edit one file's course, professor, year, term, type, and topic; optional `error` query parameter |
 | `/admin/submissions` | The review queue: pending submissions, oldest first, 20 per page, each with Publish and a Reject form that needs a reason; optional `page`, `published`, `rejected`, and `error` query parameters; admins only |
 | `/admin/questions` | Extracted question counts per course and a "Regroup and rank" button; optional `rebuilt`, `groups`, and `error` query parameters; admins only |
+| `/admin/questions/:courseId` | Question corrections: the course's question groups in rank order, 20 per page, each question with a "Correct" link, and the activity log of the latest 50 corrections; optional `q` and `page` query parameters; admins only |
+| `/admin/questions/:courseId/:questionId` | Correct one question: edit its text, move it to another group, split it into its own group, or undo a move or split, with its correction history; optional `saved`, `regroup`, and `error` query parameters; admins only |
+| `/admin/processing` | Latest exam processing result per file, with the failed stage, reason, and an admin retry button |
 | `/admin/monitoring` | Logged errors and warnings, the 24-hour summary, and the alert status; optional `level`, `event`, and `range` query parameters; admins only |
 | `/submit` | Submit a past exam or course material for review; optional `error`, `courseId`, and `category` query parameters; requires a session |
 | `/my-submissions` | The logged-in student's submissions with their status and, if rejected, the reason; optional `submitted` query parameter; requires a session |
@@ -270,11 +273,25 @@ The page is `app/admin/submissions/page.tsx`, the actions (`requireAdmin()` firs
 - `app/globals.css` (`.field textarea`)
 - `vitest.config.ts`, `package.json`, `.github/workflows/ci.yml`
 
+## Question corrections (Sprint 3)
+
+Admins fix wrongly extracted or wrongly grouped questions so the frequency ranking stays accurate. From `/admin/questions`, "Correct questions" opens a course's groups at `/admin/questions/:courseId`, and "Correct" on a question opens its page.
+
+- **Edit text.** Replaces the question's extracted text (1 to 2,000 characters, trimmed, line breaks kept; text made only of invisible characters is refused). Students see the new text in the question bank and the ordered exam. If another admin changed the text since the form was opened, the edit is refused with "Someone else changed this question's text" instead of overwriting it.
+- **Move to group.** Puts the question in another group of the course, whatever its text says. Counts and ranks are recalculated right away.
+- **Split into its own group.** Takes the question out of its group into a group of its own that its copies do not join.
+- **Group by text again.** Undoes a move or a split.
+- **Surviving the pipeline.** A move is stored as a pin to a question in the target group (`Question.pinnedToQuestionId`), a split as `Question.splitOut`. `rebuildQuestionBank` applies them after the automatic grouping on every rebuild (`groupCorrectedQuestions` in `lib/question-grouping.ts`), so they survive "Regroup and rank", reprocessing a paper, and new papers. A corrected text is never replaced, because a paper that already has questions is not extracted again. If the pinned-to question is deleted (or its paper moves course), the moved question is grouped by its own text again. Moving a question never takes the questions moved onto it along.
+- **Activity log.** Each correction is saved in `QuestionCorrection` with the admin, the paper and question number, and the before and after text or group, and is shown on the course page (latest 50) and the question page. It is kept when the question, paper, or admin is deleted; deleting the course deletes it.
+- **Limits and timing.** At most `CORRECTION_RATE_LIMIT_PER_MINUTE` corrections (default 60) per admin per minute. Each correction takes the course's regroup lock, so it never interleaves with a rebuild. The page and each correction print `operation_timed` lines (`question_corrections_page`, `question_correction_edit|move|split|reset`).
+
+The service is `lib/question-corrections.ts` with messages in `lib/question-correction-rules.ts`, the actions (`requireAdmin()` first) are `lib/question-correction-actions.ts`, and the pages are under `app/admin/questions/[courseId]/`. Tests: `tests/unit/question-corrections-grouping.test.ts`, `tests/unit/question-corrections.test.ts`, `tests/unit/question-correction-pages.test.tsx`, `tests/integration/question-corrections.test.ts`, and `tests/e2e/admin-question-corrections.spec.ts`; the load test is `npm run load -- question-corrections`. Details and results: `QUESTION_CORRECTIONS_REPORT.md`.
+
 ## Exam pipeline integration tests (US-92)
 
 `tests/integration/exam-pipeline.test.ts` runs the exam pipeline end to end against a real database: five sample exam PDFs (built in `tests/integration/fixtures/sample-exams.ts`) are uploaded through `POST /api/admin/uploads`, their questions extracted, grouped and ranked by `rebuildQuestionBank`, and the result checked against the expected consolidated ordered exam (`getConsolidatedExam`), question by question, with counts, tiers, and papers. Other tests cover upload order, concurrent uploads, pending and rejected submissions, materials, deleted and re-tagged papers, non-admin uploads, and a 20-paper course within 1 s per stage. They run in CI with `npm run test:integration`.
 
-Extraction (US-14) is not on main yet: `tests/integration/fixtures/pipeline.ts` is the one place to plug the real extractor in. Failed processing runs (US-76) are todo tests. Load tests: `npm run load -- ordered-exam` and `npm run load -- exam-upload`. Details, findings, and results: `PIPELINE_INTEGRATION_REPORT.md`. No product code is changed.
+Exam uploads and published exam submissions now run PDF text extraction, store numbered questions, and rebuild the course's question bank. Each attempt is saved as a processing run. Admins can see its stage and reason, then retry failures at `/admin/processing`. Image-only PDFs fail with "No extractable text"; unreadable PDFs fail separately. Existing questions on older files are kept and regrouped. Load tests: `npm run load -- ordered-exam` and `npm run load -- exam-upload`. `PIPELINE_INTEGRATION_REPORT.md` records the earlier test results, before extraction was connected.
 
 ## Profile (US-04)
 
@@ -427,6 +444,9 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | 1 (Sprint 2) | `password_reset_failed`, `password_reset_email_failed` | error | `stage`, `userId`, `reason`, `errorType`, `errorCode` |
 | US-74 | `submission_reviewed` | info | `fileId`, `courseId`, `operation`, `userId` (the admin) |
 | US-74 | `submission_review_refused`, `submission_review_rate_limited` | warn | `fileId`, `operation`, `reason`, `userId`, `retryAfterSeconds` |
+| Sprint 3 | `question_corrected` | info | `courseId`, `questionId`, `kind` (`edit`, `move`, `split`, `reset`), `userId` (the admin), `regrouped` |
+| Sprint 3 | `question_correction_refused`, `question_correction_rate_limited` | warn | `courseId`, `questionId`, `kind`, `reason`, `userId`, `retryAfterSeconds` |
+| Sprint 3 | `question_correction_failed`, `question_correction_retrieval_failed` | error | `courseId`, `questionId`, `kind`, `userId`, `errorType` |
 | US-74 | `slow_operation` | warn | `operation`, `durationMs`, and the operation's IDs |
 
 ### What is never logged

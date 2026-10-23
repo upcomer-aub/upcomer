@@ -3,13 +3,13 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const { course, courseProfessor, term, courseFile, rebuildQuestionBank } = vi.hoisted(() => ({
+const { course, courseProfessor, term, courseFile, processExamFile } = vi.hoisted(() => ({
   course: { findUnique: vi.fn() }, courseProfessor: { findUnique: vi.fn() }, term: { findUnique: vi.fn() },
   courseFile: { create: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-  rebuildQuestionBank: vi.fn(),
+  processExamFile: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({ db: { course, courseProfessor, term, courseFile } }));
-vi.mock("@/lib/question-bank", () => ({ rebuildQuestionBank }));
+vi.mock("@/lib/exam-processing", () => ({ processExamFile }));
 import {
   canViewFile, getMySubmissions, listPendingSubmissions, MAX_REJECTION_REASON_LENGTH, publishSubmission, PUBLISHED_FILES,
   rejectSubmission, saveSubmission, submissionMessage, validateSubmissionFile,
@@ -34,7 +34,7 @@ beforeEach(async () => {
   courseFile.findMany.mockReset().mockResolvedValue([]);
   courseFile.findUnique.mockReset().mockResolvedValue({ id: "file-a", courseId: "course-a", category: "EXAM" });
   courseFile.updateMany.mockReset().mockResolvedValue({ count: 1 });
-  rebuildQuestionBank.mockReset().mockResolvedValue({ ok: true, groupCount: 0, questionCount: 0 });
+  processExamFile.mockReset().mockResolvedValue({ ok: true });
 });
 afterEach(async () => {
   errors.mockRestore();
@@ -130,12 +130,12 @@ describe("reviewing (acceptance test 2)", () => {
     expect(update.data).toMatchObject({ status: "PUBLISHED" });
     expect(update.data.reviewedAt).toBeInstanceOf(Date);
     expect(update.data).not.toHaveProperty("rejectionReason");
-    expect(rebuildQuestionBank).toHaveBeenCalledWith("course-a");
+    expect(processExamFile).toHaveBeenCalledWith("file-a");
   });
   it("does not regroup when a material is published", async () => {
     courseFile.findUnique.mockResolvedValue({ id: "file-a", courseId: "course-a", category: "MATERIAL" });
     await publishSubmission("file-a");
-    expect(rebuildQuestionBank).not.toHaveBeenCalled();
+    expect(processExamFile).not.toHaveBeenCalled();
   });
   it("rejects with a trimmed reason, and logs the file ID but never the reason", async () => {
     expect(await rejectSubmission("file-a", "  Wrong course: this is EECE330.  ")).toMatchObject({ ok: true });
@@ -144,7 +144,7 @@ describe("reviewing (acceptance test 2)", () => {
     expect(update.data).toMatchObject({ status: "REJECTED", rejectionReason: "Wrong course: this is EECE330." });
     expect(logged()).toEqual([expect.objectContaining({ event: "submission_rejected", level: "info", fileId: "file-a" })]);
     expect(JSON.stringify(logged())).not.toContain("Wrong course");
-    expect(rebuildQuestionBank).not.toHaveBeenCalled();
+    expect(processExamFile).not.toHaveBeenCalled();
   });
   it("requires a reason of at most 500 characters before touching the file", async () => {
     expect(await rejectSubmission("file-a", "   ")).toEqual({ ok: false, error: "reason_required" });
@@ -156,7 +156,7 @@ describe("reviewing (acceptance test 2)", () => {
     courseFile.updateMany.mockResolvedValue({ count: 0 });
     expect(await publishSubmission("file-a")).toEqual({ ok: false, error: "not_pending" });
     expect(await rejectSubmission("file-a", "Duplicate")).toEqual({ ok: false, error: "not_pending" });
-    expect(rebuildQuestionBank).not.toHaveBeenCalled();
+    expect(processExamFile).not.toHaveBeenCalled();
     expect(logged()).toEqual([]);
   });
   it("reports an unknown file", async () => {

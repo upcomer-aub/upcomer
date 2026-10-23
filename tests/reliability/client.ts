@@ -18,13 +18,15 @@ export class Client {
     else this.cookies.delete("upcomer_session");
   }
 
-  async request(path: string, init: { method?: string; body?: FormData | string; headers?: Record<string, string> } = {}): Promise<Reply> {
+  async request(path: string, init: { method?: string; body?: FormData | string; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<Reply> {
     const headers: Record<string, string> = { ...init.headers };
     if (this.cookies.size) headers.cookie = [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ");
     // A browser posts with its Origin; the server-action CSRF check compares it with the host.
     if (init.method === "POST") headers.origin = this.baseUrl;
     const started = performance.now();
-    const response = await fetch(new URL(path, this.baseUrl), { method: init.method ?? "GET", body: init.body, headers, redirect: "manual" });
+    // An optional time limit (used by npm run availability); the fetch then rejects with a TimeoutError.
+    const signal = init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : undefined;
+    const response = await fetch(new URL(path, this.baseUrl), { method: init.method ?? "GET", body: init.body, headers, redirect: "manual", signal });
     const bytes = Buffer.from(await response.arrayBuffer());
     const ms = performance.now() - started;
     for (const cookie of response.headers.getSetCookie()) {
@@ -41,16 +43,16 @@ export class Client {
     };
   }
 
-  get(path: string) {
-    return this.request(path);
+  get(path: string, timeoutMs?: number) {
+    return this.request(path, { timeoutMs });
   }
 
   // Submits a server-action form the way a browser without JavaScript does: a multipart POST with the action's hidden ID field.
-  postAction(path: string, actionId: string, fields: Record<string, string | string[]>) {
+  postAction(path: string, actionId: string, fields: Record<string, string | string[]>, timeoutMs?: number) {
     const form = new FormData();
     form.append(actionId, "");
     for (const [name, value] of Object.entries(fields)) for (const item of [value].flat()) form.append(name, item);
-    return this.request(path, { method: "POST", body: form });
+    return this.request(path, { method: "POST", body: form, timeoutMs });
   }
 }
 

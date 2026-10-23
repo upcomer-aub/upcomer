@@ -1,0 +1,15 @@
+{
+  "dataset": "synthetic",
+  "datasetVersion": 1,
+  "grouper": "rules (lib/question-grouping.ts)",
+  "metrics": {
+    "pairPrecision": 1,
+    "pairRecall": 0.5663,
+    "pairF1": 0.7231,
+    "exactGroups": 0.625,
+    "countAccuracy": 0.4359,
+    "rankCorrelation": 0.8771,
+    "topPrecision": 0.8
+  },
+  "recordedAt": "2026-10-23"
+}

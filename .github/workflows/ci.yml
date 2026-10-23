@@ -31,6 +31,8 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
+      # US-93: grouping and ranking accuracy on the committed evaluation set; fails if it drops below the baseline.
+      - run: npm run eval:grouping
       - run: npm run build
 
   e2e:

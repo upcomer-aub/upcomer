@@ -1,0 +1,137 @@
+{
+  "name": "synthetic",
+  "version": 1,
+  "description": "Synthetic hand-checked set (US-93): 16 made-up papers in two courses, written to look like extracted past papers. Every gold group was decided by hand. It mixes copies the grouping should catch (renumbering, marks, case, spacing, one-letter typos), copies it cannot catch yet (rewording, word order, hyphens and apostrophes; the target of US-15b), and different questions that must stay apart (other numbers, IPv4 and IPv6, CSMA/CD and CSMA/CA). Safe to publish: no real exam text.",
+  "notes": {
+    "tcp-handshake": "Includes 'Describe how TCP sets up a connection with a three-way handshake.': a rewording of the same question, so it is gold-grouped with the others.",
+    "tcp-congestion": "'slow-start' with a hyphen is the same question as 'slow start'.",
+    "tcp-udp-compare": "'Compare UDP and TCP' asks the same thing as 'Compare TCP and UDP'.",
+    "osi-layers": "'Name the 7 layers' is the same question as 'List the seven layers'.",
+    "subnet-4": "Kept apart from subnet-8: a different number of subnets is a different question.",
+    "subnet-8": "See subnet-4.",
+    "dijkstra": "'Dijkstras' without the apostrophe is the same question.",
+    "arp-purpose": "'What's' and 'What is' are the same question.",
+    "dns-resolution": "'host name' and 'hostname' are the same question.",
+    "routing-figure": "Two-part question; both copies have the same parts.",
+    "http-persistence": "'nonpersistent' and 'non-persistent' are the same question.",
+    "interval-3n": "Kept apart from interval-2n: a different series is a different question. 'Find the radius and interval of convergence' is gold-grouped here because the interval is what is asked in both.",
+    "interval-2n": "See interval-3n.",
+    "ratio-series": "'Determine if' and 'Determine whether' are the same question.",
+    "maclaurin-ln": "'Taylor series ... about x = 0' is the Maclaurin series, so the same question.",
+    "alt-error-0001": "Kept apart from alt-error-001: a different accuracy is a different question.",
+    "alt-error-001": "See alt-error-0001.",
+    "taylor-sqrt": "The same question with its two halves in the other order."
+  },
+  "papers": [
+    { "id": "eece350-f25", "course": "EECE350", "title": "EECE 350 Final Fall 2025", "year": 2025, "questions": [
+      ["tcp-handshake", "1. Explain the TCP three-way handshake. (10 points)"],
+      ["tcp-congestion", "2. Explain TCP congestion control, including slow start and congestion avoidance."],
+      ["osi-layers", "3. List the seven layers of the OSI model."],
+      ["subnet-4", "4. Divide 192.168.1.0/24 into 4 equal subnets and give each subnet's range."],
+      ["dns-resolution", "5. Explain how DNS resolves a hostname, and compare iterative and recursive queries."],
+      ["routing-figure", "6. Consider the network in Figure 2.\n(a) Find the shortest path from A to F.\n(b) Give the forwarding table of router A."]
+    ] },
+    { "id": "eece350-s25", "course": "EECE350", "title": "EECE 350 Final Spring 2025", "year": 2025, "questions": [
+      ["tcp-handshake", "Q1) Explain the TCP three-way handshake."],
+      ["tcp-udp-compare", "2. Compare TCP and UDP."],
+      ["dijkstra", "3. Run Dijkstra's algorithm on the graph below starting from node A."],
+      ["ipv6-header", "4. Draw the IPv6 header and explain each field."],
+      ["csma-cd", "5. Explain CSMA/CD."],
+      ["stop-and-wait", "6. A link has a bandwidth of 10 Mbps and a propagation delay of 20 ms. Compute the throughput of stop-and-wait with 1,000-byte frames."]
+    ] },
+    { "id": "eece350-f24", "course": "EECE350", "title": "EECE 350 Final Fall 2024", "year": 2024, "questions": [
+      ["tcp-handshake", "1. explain the TCP three-way handshake [8 marks]"],
+      ["tcp-congestion", "2. Explain TCP congestion control, including slow start and congestion avoidance. (15 points)"],
+      ["ipv4-header", "3. Draw the IPv4 header and explain each field."],
+      ["subnet-4", "4. Divide 192.168.1.0/24 into 4 equal subnets and give each subnet's range."],
+      ["csma-ca", "5. Explain CSMA/CA."],
+      ["go-back-n", "6. Explain how Go-Back-N recovers from a lost packet."]
+    ] },
+    { "id": "eece350-m24", "course": "EECE350", "title": "EECE 350 Midterm Fall 2024", "year": 2024, "questions": [
+      ["osi-layers", "1. List the seven layers of the OSI model."],
+      ["arp-purpose", "2. What is the purpose of ARP?"],
+      ["tcp-congestion", "3. Explain TCP congestoin control, including slow start and congestion avoidance."],
+      ["crc", "4. Compute the CRC for the message 1101011011 using the generator 10011."],
+      ["http-persistence", "5. Compare persistent and non-persistent HTTP."]
+    ] },
+    { "id": "eece350-f23", "course": "EECE350", "title": "EECE 350 Final Fall 2023", "year": 2023, "questions": [
+      ["tcp-udp-compare", "1. Compare UDP and TCP."],
+      ["tcp-handshake", "2. Explain the TCP three way handshake."],
+      ["dijkstra", "3. Run Dijkstra's algorithm on the graph below starting from node A. (12 points)"],
+      ["arp-purpose", "4. What's the purpose of ARP?"],
+      ["dns-resolution", "5. Explain how DNS resolves a hostname and compare iterative and recursive queries."],
+      ["selective-repeat", "6. Explain how Selective Repeat recovers from a lost packet."]
+    ] },
+    { "id": "eece350-f22", "course": "EECE350", "title": "EECE 350 Final Fall 2022", "year": 2022, "questions": [
+      ["tcp-handshake", "1. Describe how TCP sets up a connection with a three-way handshake."],
+      ["tcp-congestion", "2. Explain TCP congestion control including slow-start and congestion avoidance."],
+      ["subnet-8", "3. Divide 192.168.1.0/24 into 8 equal subnets and give each subnet's range."],
+      ["ipv4-header", "4. Draw the IPv4 header and explain each field."],
+      ["csma-cd", "5. Explain CSMA/CD."],
+      ["routing-figure", "6. Consider the network in Figure 2.\n(a) Find the shortest path from A to F.\n(b) Give the forwarding table of router A."]
+    ] },
+    { "id": "eece350-f21", "course": "EECE350", "title": "EECE 350 Final Fall 2021", "year": 2021, "questions": [
+      ["tcp-handshake", "1. Explain the TCP three-way handshake."],
+      ["dijkstra", "2. Run Dijkstras algorithm on the graph below starting from node A."],
+      ["tcp-udp-compare", "3. Compare TCP and UDP. (6 points)"],
+      ["dns-resolution", "4. Explain how DNS resolves a host name, and compare iterative and recursive queries."],
+      ["crc", "5. Compute the CRC for the message 1101011011 using the generator 10011 (8 points)"],
+      ["http-persistence", "6. Compare persistent and nonpersistent HTTP."]
+    ] },
+    { "id": "eece350-m21", "course": "EECE350", "title": "EECE 350 Midterm Spring 2021", "year": 2021, "questions": [
+      ["osi-layers", "1. Name the 7 layers of the OSI model."],
+      ["tcp-congestion", "2. Explain TCP congestion control, including slow start and congestion avoidance."],
+      ["arp-purpose", "3. What is the purpose of ARP? (4 points)"],
+      ["go-back-n", "4. Explain how Go-Back-N recovers from a lost packet."],
+      ["nat", "5. Explain how NAT lets several hosts share one public IP address."]
+    ] },
+    { "id": "math201-f16", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2016", "year": 2016, "questions": [
+      ["ratio-series", "1. (10 pts) Determine whether the series sum_{n=1}^inf n!/n^n converges or diverges."],
+      ["interval-3n", "2. Find the interval of convergence of the power series sum_{n=1}^inf (x-2)^n/(n 3^n)."],
+      ["sequence-limit", "3. Find the limit of the sequence a_n = (1 + 2/n)^n."],
+      ["integral-test", "4. Use the integral test to determine whether sum_{n=2}^inf 1/(n (ln n)^2) converges."]
+    ] },
+    { "id": "math201-f17", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2017", "year": 2017, "questions": [
+      ["ratio-series", "1. Determine whether the series sum_{n=1}^inf n!/n^n converges or diverges."],
+      ["maclaurin-ln", "2. Find the Maclaurin series of f(x) = ln(1+2x)."],
+      ["alt-error-0001", "3. How many terms of the series sum_{n=1}^inf (-1)^(n+1)/n^2 are needed to approximate its sum within 0.001?"],
+      ["comparison-test", "4. Use the comparison test to determine whether sum_{n=1}^inf 1/(n^2 + 1) converges."]
+    ] },
+    { "id": "math201-f18", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2018", "year": 2018, "questions": [
+      ["ratio-series", "1) Determine whether the series sum_{n=1}^inf n! / n^n converges or diverges."],
+      ["interval-3n", "2) Find the interval of convergence of the power series sum_{n=1}^inf ( x - 2 )^n/(n 3^n)."],
+      ["geometric-sum", "3) Find the sum of the series sum_{n=0}^inf 3/4^n."],
+      ["taylor-sqrt", "4) Use the second-degree Taylor polynomial of f(x) = sqrt(x) at x = 4 to approximate sqrt(4.1)."]
+    ] },
+    { "id": "math201-f19", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2019", "year": 2019, "questions": [
+      ["interval-3n", "1. Find the radius and interval of convergence of the power series sum_{n=1}^inf (x-2)^n/(n 3^n)."],
+      ["maclaurin-ln", "2. Find the Maclaurin series of f(x) = ln(1+2x). (8 points)"],
+      ["alt-error-001", "3. How many terms of the series sum_{n=1}^inf (-1)^(n+1)/n^2 are needed to approximate its sum within 0.01?"],
+      ["abs-conditional", "4. Determine whether the series sum_{n=1}^inf (-1)^n/sqrt(n) converges absolutely, conditionally, or diverges."]
+    ] },
+    { "id": "math201-f20", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2020", "year": 2020, "questions": [
+      ["ratio-series", "1. Determine if the series sum_{n=1}^inf n!/n^n converges or diverges."],
+      ["sequence-limit", "2. Find the limit of the sequence a_n = (1 + 2/n)^n."],
+      ["geometric-sum", "3. Find the sum of the series sum_{n=0}^inf 3/4^n."],
+      ["taylor-sqrt", "4. Approximate sqrt(4.1) using the second-degree Taylor polynomial of f(x) = sqrt(x) at x = 4."]
+    ] },
+    { "id": "math201-f21", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2021", "year": 2021, "questions": [
+      ["interval-3n", "1. Find the interval of convergence of the power series sum_{n=1}^inf (x-2)^n/(n 3^n)."],
+      ["maclaurin-ln", "2. Find the Taylor series of f(x) = ln(1+2x) about x = 0."],
+      ["alt-error-0001", "3. How many terms of the series sum_{n=1}^inf (-1)^(n+1)/n^2 are needed to approximate its sum within 0.001? [6 marks]"],
+      ["abs-conditional", "4. Determine whether the series sum_{n=1}^inf (-1)^n/sqrt(n) converges absolutely, conditionally, or diverges."]
+    ] },
+    { "id": "math201-f22", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2022", "year": 2022, "questions": [
+      ["ratio-series", "1. Determine whether the series sum_{n=1}^inf n!/n^n converges or diverges."],
+      ["sequence-limit", "2. Find the limit of the sequnce a_n = (1+2/n)^n."],
+      ["integral-test", "3. Use the integral test to determine whether sum_{n=2}^inf 1/(n (ln n)^2) converges."],
+      ["abs-conditional", "4. Determine whether the series sum_{n=1}^inf (-1)^n/sqrt(n) converges absolutely, conditionally, or diverges. (10 pts)"]
+    ] },
+    { "id": "math201-f23", "course": "MATH201", "title": "MATH 201 Quiz 1 Fall 2023", "year": 2023, "questions": [
+      ["interval-2n", "1. Find the interval of convergence of the power series sum_{n=1}^inf (x-2)^n/(n 2^n)."],
+      ["maclaurin-ln", "2. Find the Maclaurin series of f(x) = ln(1+2x)."],
+      ["geometric-sum", "3. Find the sum of the seires sum_{n=0}^inf 3/4^n."],
+      ["taylor-sqrt", "4. Use the second-degree Taylor polynomial of f(x) = sqrt(x) at x = 4 to approximate sqrt(4.1)."]
+    ] }
+  ]
+}

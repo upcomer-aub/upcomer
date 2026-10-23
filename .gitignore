@@ -15,3 +15,6 @@ public/uploads/demo/
 /reports/*
 !/reports/reliability-2026-10-05.md
 !/reports/reliability-2026-10-05.json
+
+# US-93: evaluation sets built from real past papers stay on the machine; the repository is public.
+/eval/grouping/local/

@@ -32,6 +32,13 @@ describe("automatic exam extraction", () => {
     await expect(extractExamQuestions(imageOnlyPdf())).rejects.toMatchObject({ reason: "no_text" });
   });
 
+  it("extracts compact labels and colon labels without splitting decimals, times, or sub-parts", async () => {
+    expect(await extractExamQuestions(textPdf([["1: Define latency.", "2)Explain throughput.", "3.5 Mbps is the link speed.", "1:20 is the start time.", "(a) Give units.", "(3)Describe jitter.", "Q4.Explain ARP."]]))).toEqual([
+      "1: Define latency.", "2)Explain throughput.\n3.5 Mbps is the link speed.\n1:20 is the start time.\n(a) Give units.",
+      "(3)Describe jitter.", "Q4.Explain ARP.",
+    ]);
+  });
+
   it("reports an unreadable PDF", async () => {
     await expect(extractExamQuestions(corruptPdf())).rejects.toMatchObject({ reason: "unreadable_pdf" });
   });

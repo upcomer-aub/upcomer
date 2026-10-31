@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export default async function ProcessingPage({ searchParams }: { searchParams: Promise<{ retried?: string; error?: string }> }) {
   await requireAdmin("/admin/processing");
   const { retried, error } = await searchParams;
-  const files = await getExamProcessingRuns();
+  // Prisma may load the relation after the files: a concurrently deleted file/run can disappear between reads.
+  const files = (await getExamProcessingRuns()).filter(file => file.processingRuns.length > 0);
   return <><Link className="back" href="/admin/uploads">← Back to uploads</Link><span className="eyebrow">Admin</span><h1>Exam processing</h1>
     <p className="muted">Each uploaded or approved PDF is checked for questions. Failed attempts can be retried after the file is fixed.</p>
     {retried && <p className="notice" role="status">Processing was retried. See its latest result below.</p>}

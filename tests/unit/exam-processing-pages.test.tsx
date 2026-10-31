@@ -46,4 +46,17 @@ describe("admin exam processing page", () => {
     await retryExamAction(form);
     expect(mocks.redirect).toHaveBeenCalledWith("/admin/processing?retried=1");
   });
+
+  it("never calls the retry service when the admin guard rejects the request", async () => {
+    mocks.requireAdmin.mockRejectedValue(new Error("access denied"));
+    await expect(retryExamAction(new FormData())).rejects.toThrow("access denied");
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("handles a run disappearing between the file and relation reads", async () => {
+    mocks.getRuns.mockResolvedValue([{ id: "file-a", title: "Final", course: { code: "EECE350" }, processingRuns: [] }]);
+    const html = renderToStaticMarkup(await ProcessingPage({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain("No exams have been processed yet.");
+  });
 });

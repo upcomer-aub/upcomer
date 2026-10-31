@@ -16,6 +16,7 @@ const REASONS: Record<string, string> = {
 };
 export const processingReason = (reason: string | null) => REASONS[reason ?? ""] ?? REASONS.unexpected;
 const STALE_RUN_MS = 15 * 60 * 1000;
+const errorType = (error: unknown) => error instanceof Error ? error.name : "Unknown";
 
 export const canRetryRun = (run: { status: ProcessingStatus; createdAt: Date }, now = new Date()) =>
   run.status === ProcessingStatus.FAILED || (run.status === ProcessingStatus.RUNNING && now.getTime() - run.createdAt.getTime() > STALE_RUN_MS);
@@ -41,7 +42,10 @@ export async function processExamFile(fileId: string, { retry = false } = {}) {
     logError("exam_processing_failed", { fileId, stage: ProcessingStage.EXTRACTION, reason: "unexpected", errorType: error instanceof Error ? error.name : "Unknown" });
     return { ok: false as const, reason: "unexpected" };
   }
-  if (!file || file.category !== FileCategory.EXAM || file.status !== FileStatus.PUBLISHED) return { ok: false as const, reason: "not_eligible" };
+  if (!file || file.category !== FileCategory.EXAM || file.status !== FileStatus.PUBLISHED) {
+    if (retry) logError("exam_retry_refused", { fileId, reason: "not_eligible" });
+    return { ok: false as const, reason: "not_eligible" };
+  }
   let run;
   try {
     run = await startRun(fileId, retry);
@@ -49,7 +53,13 @@ export async function processExamFile(fileId: string, { retry = false } = {}) {
     logError("exam_processing_failed", { fileId, stage: ProcessingStage.EXTRACTION, reason: "unexpected", errorType: error instanceof Error ? error.name : "Unknown" });
     return { ok: false as const, reason: "unexpected" };
   }
-  if (!run) return { ok: false as const, reason: "not_failed" };
+  if (!run) {
+    logError("exam_retry_refused", { fileId, reason: "not_failed" });
+    return { ok: false as const, reason: "not_failed" };
+  }
+  const started = performance.now();
+  const context = { fileId, courseId: file.courseId, runId: run.id, retry: String(retry) };
+  logError("exam_processing_started", context);
   let stage: ProcessingStage = ProcessingStage.EXTRACTION;
   try {
     // Older files may already have questions. Keep those rows and just rank them.
@@ -69,31 +79,47 @@ export async function processExamFile(fileId: string, { retry = false } = {}) {
     const grouped = await rebuildQuestionBank(file.courseId);
     if (!grouped.ok) throw new Error("grouping_failed");
     await db.fileProcessingRun.update({ where: { id: run.id }, data: { status: ProcessingStatus.SUCCEEDED } });
+    logError("exam_processing_completed", { ...context, questionCount: String(questionCount), durationMs: String(Math.round(performance.now() - started)) });
     return { ok: true as const, runId: run.id, questionCount };
   } catch (error) {
     const reason = error instanceof ExtractionError ? error.reason
       : error instanceof FileUnavailableError ? "missing_file"
       : stage === ProcessingStage.GROUPING ? "grouping_failed" : "unexpected";
-    await db.fileProcessingRun.update({ where: { id: run.id }, data: { status: ProcessingStatus.FAILED, stage, reason } }).catch(() => undefined);
-    logError("exam_processing_failed", { fileId, runId: run.id, stage, reason });
+    await db.fileProcessingRun.update({ where: { id: run.id }, data: { status: ProcessingStatus.FAILED, stage, reason } }).catch(recordError => {
+      logError("exam_processing_record_failed", { ...context, stage, reason, errorType: errorType(recordError) });
+    });
+    logError("exam_processing_failed", { ...context, stage, reason, errorType: errorType(error), durationMs: String(Math.round(performance.now() - started)) });
     return { ok: false as const, runId: run.id, reason };
   }
 }
 
 export async function getExamProcessingRuns() {
-  return db.courseFile.findMany({
-    where: { category: FileCategory.EXAM, processingRuns: { some: {} } },
-    select: {
-      id: true, title: true, course: { select: { code: true } },
-      processingRuns: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  try {
+    return await db.courseFile.findMany({
+      where: { category: FileCategory.EXAM, processingRuns: { some: {} } },
+      select: {
+        id: true, title: true, course: { select: { code: true } },
+        processingRuns: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch (error) {
+    logError("exam_processing_retrieval_failed", { errorType: errorType(error) });
+    throw error;
+  }
 }
 
 export async function retryFailedExam(fileId: string) {
-  const latest = await db.fileProcessingRun.findFirst({ where: { fileId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
-  if (!latest || !canRetryRun(latest)) return { ok: false as const, reason: "not_failed" };
+  try {
+    const latest = await db.fileProcessingRun.findFirst({ where: { fileId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+    if (!latest || !canRetryRun(latest)) {
+      logError("exam_retry_refused", { fileId, reason: "not_failed" });
+      return { ok: false as const, reason: "not_failed" };
+    }
+  } catch (error) {
+    logError("exam_processing_failed", { fileId, retry: "true", reason: "unexpected", errorType: errorType(error) });
+    return { ok: false as const, reason: "unexpected" };
+  }
   // Checked again under the lock when the run starts.
   return processExamFile(fileId, { retry: true });
 }

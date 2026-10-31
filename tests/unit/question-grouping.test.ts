@@ -10,6 +10,9 @@ const question = (fileId: string, text: string, extra: Partial<SourceQuestion> =
 const texts = (groups: { questions: SourceQuestion[] }[]) => groups.map(group => group.questions.map(item => item.text));
 
 describe("normalizeQuestionText", () => {
+  it("preserves variable names beginning with Q and digits", () => {
+    expect(cleanQuestionText("Q2value is the measured charge.")).toBe("Q2value is the measured charge.");
+  });
   it.each([
     ["Explain the TCP three-way handshake.", "explain the tcp three-way handshake"],
     ["  EXPLAIN   the TCP\nthree-way handshake ", "explain the tcp three-way handshake"],

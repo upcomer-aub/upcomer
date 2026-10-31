@@ -57,12 +57,12 @@ After the final run, Ali Slim's test prefixes had zero remaining courses, files,
 | `npx prisma generate` | Passed |
 | `npx prisma migrate deploy` on the empty test database | All 14 existing migrations applied |
 | `npm run db:seed` | Passed |
-| `npm.cmd test -- --maxWorkers=2` | 933 tests passed in 62 files, including the concurrent-deletion regression |
-| `npm run test:integration` | Final run: 90 tests passed in 9 files |
+| `npm.cmd test -- --maxWorkers=2` | Second pass: 938 tests passed in 62 files, including variable-label and queued-retry regressions |
+| `npm run test:integration` | Second pass: 91 tests passed in 9 files, including retries of a scan that immediately fails again |
 | `npm run lint`, `npx tsc --noEmit`, `git diff --check` | Passed |
 | `npm run build` | Passed; browser verification also builds afresh |
 | `npm run eval:grouping` | Passed, with the existing baseline/thresholds |
-| `npx.cmd playwright test --workers 2`, `CI=true` | 84 passed, no failures or skipped tests, against a fresh production build (4.0 minutes including build) |
+| `npx.cmd playwright test --workers 2`, `CI=true` | Second pass: 85 passed, no failures or skipped tests, against a fresh production build (4.7 minutes including build) |
 | Schema versus migrated database | Passed: `prisma migrate diff` reported no difference |
 
 The committed synthetic accuracy set gives **100% pair precision, 86.8% recall, 92.9% F1, 94.2% rank correlation and 100% top-5 precision**. Some equivalent rewordings are still missed; the report names them. This does not establish accuracy on arbitrary real exams.
@@ -80,6 +80,17 @@ Earlier verification failures were investigated rather than hidden: the first ne
 
 The final real-database extraction cross-test's local timing samples were 112 ms for a 10-page/30-question upload, 249 ms for a 40-page/160-question upload, and 1,941 ms to reject a 2,000-page blank PDF (496,138 bytes). These are single-run observations on this machine. Processing still runs before the upload response; there is no background worker or queue.
 
+## Second review pass
+
+A second comparison with the plan checked US-14/US-76 behavior, monitoring, the US-15b/US-23 cross-tests, and the 50-trial reliability requirement. It found two additional edge cases, confirmed with failing regression tests before fixing them:
+
+- Compact-label recognition also matched variables such as `Q2value`, splitting a wrapped question and dropping part of the variable during question-bank cleanup. Compact labels now require preceding label punctuation; whitespace-separated and standalone labels remain supported.
+- A queued retry could start another attempt if the first retry had already failed again. The admin form now includes the displayed run ID, and both the initial lookup and the per-file locked check verify the run identity. A stale tab is refused; a later deliberate retry of the latest failed run still works. Added unit, real-database burst, and two-tab browser regressions.
+
+`lib/exam-processing-actions.ts` now forwards the displayed run ID after checking admin access. Additional regressions are in `tests/integration/cross-test-us14-us76.test.ts` and `tests/e2e/admin-exam-processing.spec.ts`. No schema, dependency or migration change was required by the second pass. Its final check totals supersede the first-pass totals above.
+
+The second pass passed all 938 unit/component tests, 91 integration tests, 85 browser tests, both 50-trial reliability checks, lint, TypeScript, the production build and the unchanged grouping-accuracy thresholds. The added two-tab browser regression passed. Cleanup checks found zero remaining courses, files, students or faculties under the `slim-`, `qa-proc-` and `it-m4-` test prefixes, and the temporary database was stopped again.
+
 ## Files touched outside Ali Slim's extraction/processing files
 
 - `lib/logger.ts`: event-union repair and processing monitoring events/levels.
@@ -87,10 +98,11 @@ The final real-database extraction cross-test's local timing samples were 112 ms
 - `lib/question-grouping.ts`: extraction-label cleanup, split-group metadata and the two accuracy defects.
 - `prisma/schema.prisma`: duplicate Course-field repair, retaining corrections/reports/progress/profile relations.
 - `tests/unit/question-bank.test.ts`, `tests/unit/question-grouping.test.ts`, `tests/unit/grouping-eval.test.ts`: interface/batching fixes and regressions above.
+- `tests/integration/cross-test-us14-us76.test.ts`, `tests/e2e/admin-exam-processing.spec.ts`: appended fast-failure burst and stale-tab regressions; retained the earlier cross-test checks.
 - `eslint.config.mjs`: ignore generated test artifacts.
 - `README.md`: behavior, events, verification commands and report links.
 
-Ali Slim's other changes are in `lib/exam-extraction.ts`, `lib/exam-processing.ts`, `app/admin/processing/page.tsx`, the three extraction/processing unit test files, `tests/integration/cross-test-us15b-us23.test.ts`, `tests/e2e/exam-processing-reliability.spec.ts`, and these two new reports.
+Ali Slim's other changes are in `lib/exam-extraction.ts`, `lib/exam-processing.ts`, `lib/exam-processing-actions.ts`, `app/admin/processing/page.tsx`, the three extraction/processing unit test files, `tests/integration/cross-test-us15b-us23.test.ts`, `tests/e2e/exam-processing-reliability.spec.ts`, and these two new reports.
 
 ## Not done / hand-off
 

@@ -2,7 +2,7 @@
 // input always gives the same groups in the same order.
 
 // "Q3.", "Question 2)", "3." or "(4)" at the start, and marks such as "(10 points)" or "[5 marks]" anywhere.
-const LEADING_NUMBER = /^\s*(?:(?:question|q)\s*\d+[a-z]?\s*[.):-]?|\d+[a-z]?\s*[.):]|\(\d+[a-z]?\))(?:\s+|(?=\p{L})|$)/iu;
+const LEADING_NUMBER = /^\s*(?:(?:question|q)\s*\d+[a-z]?\s*[.):-]?|\d+[a-z]?\s*[.):]|\(\d+[a-z]?\))(?:\s+|(?<=[.):])(?=\p{L})|$)/iu;
 const MARKS = /[([]\s*\d+(?:\.\d+)?\s*(?:points?|pts?|marks?)\s*[)\]]/gi;
 // Sentence punctuation is ignored; math symbols (+ - * / = < > ^ %) are kept, so "a+b" and "a-b" stay different questions.
 const PROSE_PUNCTUATION = /[.,;:!?'"`´‘’“”()[\]{}…]/g;

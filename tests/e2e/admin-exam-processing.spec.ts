@@ -90,6 +90,25 @@ test("after the file is fixed, Retry processes it and its questions reach the or
   await expect(page.getByText("2 of 2 papers").first()).toBeVisible();
 });
 
+test("a stale retry form cannot start another attempt after the first retry fails again", async ({ page }) => {
+  const title = `Duplicate Scan ${stamp}`;
+  await logInAsAdmin(page);
+  await uploadExam(page, title, "still-scanned.pdf", imageOnlyPdf());
+  await page.goto("/admin/processing");
+  const other = await page.context().newPage();
+  try {
+    await other.goto("/admin/processing");
+    await card(page, title).getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/processing\?retried=1$/);
+    await expect(card(page, title)).toContainText("Status: Failed");
+    // The other tab still holds the previous run ID. A second failure must not make that stale request valid again.
+    await card(other, title).getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(other).toHaveURL(/\/admin\/processing\?error=not_failed$/);
+    const file = await db.courseFile.findFirstOrThrow({ where: { courseId, title } });
+    expect((await db.fileProcessingRun.findMany({ where: { fileId: file.id } })).map(run => run.status)).toEqual(["FAILED", "FAILED"]);
+  } finally { await other.close(); }
+});
+
 test("students and visitors cannot see the processing page or retry", async ({ page }) => {
   await page.goto("/admin/processing");
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fprocessing$/);

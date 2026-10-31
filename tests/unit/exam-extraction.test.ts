@@ -4,6 +4,11 @@ import { corruptPdf, imageOnlyPdf, textPdf } from "@/tests/integration/fixtures/
 import { SAMPLE_EXAMS, samplePdf } from "@/tests/integration/fixtures/sample-exams";
 
 describe("automatic exam extraction", () => {
+  it("does not split a wrapped question at a variable beginning with Q and a number", async () => {
+    expect(await extractExamQuestions(textPdf([["1. Explain the relation.", "Q2value is the measured charge.", "2. Define latency."]]))).toEqual([
+      "1. Explain the relation.\nQ2value is the measured charge.", "2. Define latency.",
+    ]);
+  });
   it("reads every sample paper used by the exam pipeline", async () => {
     for (const exam of SAMPLE_EXAMS) {
       expect(await extractExamQuestions(samplePdf(exam))).toEqual(exam.questions);

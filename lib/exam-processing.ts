@@ -22,19 +22,20 @@ export const canRetryRun = (run: { status: ProcessingStatus; createdAt: Date }, 
   run.status === ProcessingStatus.FAILED || (run.status === ProcessingStatus.RUNNING && now.getTime() - run.createdAt.getTime() > STALE_RUN_MS);
 
 // Starts a run for the file. Under a per-file lock, so simultaneous retries (a double click, two admins) start one run:
-// the others see it RUNNING and are refused. For a retry, only a failed or stale latest run may be replaced.
-async function startRun(fileId: string, retry: boolean) {
+// the others see a different or RUNNING attempt and are refused. Only a failed or stale latest run may be replaced.
+async function startRun(fileId: string, retry: boolean, expectedRunId?: string) {
   return db.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`exam-processing:${fileId}`}))`;
     if (retry) {
       const latest = await tx.fileProcessingRun.findFirst({ where: { fileId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
-      if (!latest || !canRetryRun(latest)) return null;
+      // A queued click must not retry a different attempt, even if that newer attempt has already failed.
+      if (!latest || !canRetryRun(latest) || (expectedRunId !== undefined && latest.id !== expectedRunId)) return null;
     }
     return tx.fileProcessingRun.create({ data: { fileId } });
   });
 }
 
-export async function processExamFile(fileId: string, { retry = false } = {}) {
+export async function processExamFile(fileId: string, { retry = false, expectedRunId }: { retry?: boolean; expectedRunId?: string } = {}) {
   let file;
   try {
     file = await db.courseFile.findUnique({ where: { id: fileId }, select: { id: true, courseId: true, category: true, status: true, mimeType: true } });
@@ -48,7 +49,7 @@ export async function processExamFile(fileId: string, { retry = false } = {}) {
   }
   let run;
   try {
-    run = await startRun(fileId, retry);
+    run = await startRun(fileId, retry, expectedRunId);
   } catch (error) {
     logError("exam_processing_failed", { fileId, stage: ProcessingStage.EXTRACTION, reason: "unexpected", errorType: error instanceof Error ? error.name : "Unknown" });
     return { ok: false as const, reason: "unexpected" };
@@ -109,17 +110,19 @@ export async function getExamProcessingRuns() {
   }
 }
 
-export async function retryFailedExam(fileId: string) {
+export async function retryFailedExam(fileId: string, expectedRunId?: string) {
+  let retryRunId: string;
   try {
     const latest = await db.fileProcessingRun.findFirst({ where: { fileId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
-    if (!latest || !canRetryRun(latest)) {
+    if (!latest || !canRetryRun(latest) || (expectedRunId !== undefined && latest.id !== expectedRunId)) {
       logError("exam_retry_refused", { fileId, reason: "not_failed" });
       return { ok: false as const, reason: "not_failed" };
     }
+    retryRunId = latest.id;
   } catch (error) {
     logError("exam_processing_failed", { fileId, retry: "true", reason: "unexpected", errorType: errorType(error) });
     return { ok: false as const, reason: "unexpected" };
   }
   // Checked again under the lock when the run starts.
-  return processExamFile(fileId, { retry: true });
+  return processExamFile(fileId, { retry: true, expectedRunId: retryRunId });
 }

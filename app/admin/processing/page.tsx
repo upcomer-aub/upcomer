@@ -21,7 +21,7 @@ export default async function ProcessingPage({ searchParams }: { searchParams: P
         <p>Status: {run.status === "SUCCEEDED" ? "Completed" : run.status === "RUNNING" && !interrupted ? "Processing" : "Failed"}</p>
         {canRetryRun(run) && <><p>Stage: {run.stage === "EXTRACTION" ? "Text extraction" : "Question grouping"}</p>
           <p role="alert">Reason: {interrupted ? "Processing stopped before a result was recorded." : processingReason(run.reason)}</p>
-          <form action={retryExamAction}><input type="hidden" name="fileId" value={file.id} /><button className="button" type="submit">Retry</button></form></>}
+          <form action={retryExamAction}><input type="hidden" name="fileId" value={file.id} /><input type="hidden" name="runId" value={run.id} /><button className="button" type="submit">Retry</button></form></>}
       </li>;
     })}</ul> : <p className="card muted">No exams have been processed yet.</p>}
   </>;

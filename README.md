@@ -389,6 +389,8 @@ Typed PDFs support numbered, parenthesized, Q-number and Question-number labels,
 
 `/admin/processing` shows each file's latest result. A retry creates a new run and preserves the failed attempt. Simultaneous retries are serialized per file, and a retry of failed grouping reuses existing question rows. A run still marked running after 15 minutes can be retried. Database failures while reading a retry now return a controlled error; failures to save a failed-run record are logged separately.
 
+A retry applies to the attempt displayed on the page. If another tab or admin already retried it, the old form is refused even if that newer attempt has also failed. Reload the page before deliberately retrying the latest attempt. Compact question labels must include punctuation, so a variable such as `Q2value` remains question content.
+
 Processing events appear in `/admin/monitoring` through the shared logger:
 
 | Event | Level | Meaning |

@@ -19,6 +19,15 @@ beforeEach(() => {
 });
 
 describe("admin exam processing page", () => {
+  it("passes the displayed run ID to the retry service to reject a stale form", async () => {
+    const form = new FormData();
+    form.set("fileId", "file-a");
+    form.set("runId", "old-run");
+    mocks.retry.mockResolvedValue({ ok: false, reason: "not_failed" });
+    await retryExamAction(form);
+    expect(mocks.retry).toHaveBeenCalledWith("file-a", "old-run");
+    expect(mocks.redirect).toHaveBeenCalledWith("/admin/processing?error=not_failed");
+  });
   it("shows the latest failed stage, reason, and retry control", async () => {
     mocks.getRuns.mockResolvedValue([{ id: "file-a", title: "Final", course: { code: "EECE350" },
       processingRuns: [{ id: "run-a", status: "FAILED", stage: "EXTRACTION", reason: "no_text" }] }]);
@@ -26,6 +35,7 @@ describe("admin exam processing page", () => {
     expect(mocks.requireAdmin).toHaveBeenCalledWith("/admin/processing");
     expect(html).toContain("Text extraction");
     expect(html).toContain("No extractable text was found in this PDF.");
+    expect(html).toContain('name="runId" value="run-a"');
     expect(html).toContain("Retry");
   });
 

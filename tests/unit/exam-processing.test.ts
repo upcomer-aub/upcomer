@@ -35,6 +35,17 @@ beforeEach(() => {
 });
 
 describe("exam processing and retry", () => {
+  it("refuses a stale displayed run even if the newer run has also failed", async () => {
+    mocks.run.findFirst.mockResolvedValue({ id: "new-run", status: "FAILED" });
+    expect(await retryFailedExam("file-a", "old-run")).toEqual({ ok: false, reason: "not_failed" });
+    expect(mocks.run.create).not.toHaveBeenCalled();
+  });
+  it("refuses a queued retry when another attempt has already run and failed again", async () => {
+    mocks.run.findFirst.mockResolvedValueOnce({ id: "old-run", status: "FAILED" })
+      .mockResolvedValueOnce({ id: "new-failed-run", status: "FAILED" });
+    expect(await retryFailedExam("file-a")).toEqual({ ok: false, reason: "not_failed" });
+    expect(mocks.run.create).not.toHaveBeenCalled();
+  });
   it("stores extracted questions, groups them, and records success", async () => {
     expect(await processExamFile("file-a")).toEqual({ ok: true, runId: "run-a", questionCount: 2 });
     expect(mocks.createQuestions).toHaveBeenCalledWith({ data: [

@@ -54,11 +54,16 @@ type LogEvent =
   | "submission_review_refused"
   | "submission_review_rate_limited"
   | "exam_processing_failed"
+  | "exam_processing_started"
+  | "exam_processing_completed"
+  | "exam_processing_record_failed"
+  | "exam_processing_retrieval_failed"
+  | "exam_retry_refused"
   | "question_corrected"
   | "question_correction_refused"
   | "question_correction_rate_limited"
   | "question_correction_failed"
-  | "question_correction_retrieval_failed";
+  | "question_correction_retrieval_failed"
   | "question_grouping_completed"
   | "question_grouping_low_confidence"
   | "question_report_submitted"
@@ -149,6 +154,11 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   submission_review_rate_limited: "warn",
 
   exam_processing_failed: "error",
+  exam_processing_started: "info",
+  exam_processing_completed: "info",
+  exam_processing_record_failed: "error",
+  exam_processing_retrieval_failed: "error",
+  exam_retry_refused: "warn",
   // Question corrections: admins fix extracted or grouped questions (who corrected is in userId; question text is never logged)
   question_corrected: "info",
   question_correction_refused: "warn",

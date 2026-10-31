@@ -16,7 +16,7 @@ describe("normalizeQuestionText", () => {
     ["Explain, the TCP three-way handshake!", "explain the tcp three-way handshake"],
     ["“Explain” the (TCP) three-way handshake?", "explain the tcp three-way handshake"],
   ])("ignores case, spacing, and punctuation in %j", (text, key) => expect(normalizeQuestionText(text)).toBe(key));
-  it.each(["Q3. Define a socket.", "Question 3) Define a socket.", "3. Define a socket.", "3) Define a socket.", "(3) Define a socket.", "q12 Define a socket"])(
+  it.each(["Q3. Define a socket.", "Question 3) Define a socket.", "3. Define a socket.", "3) Define a socket.", "(3) Define a socket.", "q12 Define a socket", "1: Define a socket.", "2)Define a socket.", "(3)Define a socket.", "Q4.Define a socket."])(
     "removes the question number in %j", text => expect(normalizeQuestionText(text)).toBe("define a socket"));
   it.each(["Define a socket. (10 points)", "Define a socket [5 marks]", "Define a socket (2.5 pts)"])(
     "removes marks in %j", text => expect(normalizeQuestionText(text)).toBe("define a socket"));
@@ -24,6 +24,11 @@ describe("normalizeQuestionText", () => {
     expect(normalizeQuestionText("Compute x + y = 2")).toBe(normalizeQuestionText("compute x+y=2"));
     expect(normalizeQuestionText("Compute a + b")).not.toBe(normalizeQuestionText("Compute a - b"));
     expect(normalizeQuestionText("Find x^2")).not.toBe(normalizeQuestionText("Find x^3"));
+  });
+
+  it("keeps task-defining subnet counts and approximation accuracy apart", () => {
+    expect(matchQuestions("Divide 192.168.1.0/24 into 4 equal subnets and give each subnet's range.", "Divide 192.168.1.0/24 into 8 equal subnets and give each subnet's range.")).toBeNull();
+    expect(matchQuestions("How many terms of the series are needed to approximate its sum within 0.001?", "How many terms of the series are needed to approximate its sum within 0.01?")).toBeNull();
   });
   it("keeps a number that starts the question itself", () => expect(normalizeQuestionText("2 + 2 = ?")).toBe("2+2="));
   it("shows the text without the number or marks but with its own case and punctuation", () => {

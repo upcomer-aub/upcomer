@@ -85,7 +85,10 @@ describe("rebuildQuestionBank", () => {
       { id: "q6", fileId: "paper-2025", number: 5, text: "Describe how ARP works when a host resolves addresses.", file: { year: 2025 } },
     ]);
     expect(await rebuildQuestionBank("course-a")).toEqual({ ok: true, groupCount: 3, questionCount: 6 });
-    expect(mocks.updateQuestions).toHaveBeenCalledWith({ where: { id: { in: ["q1", "q2", "q5"] } }, data: { groupId: "group-define a socket" } });
+    const assignments = mocks.executeRaw.mock.calls[1].slice(1);
+    const ids = assignments[0] as string[];
+    const groupIds = assignments[1] as string[];
+    for (const id of ["q1", "q2", "q5"]) expect(groupIds[ids.indexOf(id)]).toBe("group-define a socket");
     expect(mocks.logError).toHaveBeenCalledWith("question_grouping_completed", {
       courseId: "course-a", questionCount: "6", groupCount: "3", rewordedMatches: "1", lowConfidenceMatches: "0",
     });
@@ -120,7 +123,7 @@ describe("rebuildQuestionBank", () => {
   it("logs no grouping decisions when the rebuild fails", async () => {
     mocks.findCourse.mockResolvedValue({ id: "course-a" });
     mocks.findQuestions.mockResolvedValue(stored);
-    mocks.upsertGroup.mockRejectedValue(failure("PrismaClientKnownRequestError"));
+    mocks.createGroups.mockRejectedValue(failure("PrismaClientKnownRequestError"));
     expect(await rebuildQuestionBank("course-a")).toEqual({ ok: false, error: "unexpected" });
     expect(mocks.logError).not.toHaveBeenCalledWith("question_grouping_completed", expect.anything());
   });

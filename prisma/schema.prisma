@@ -107,20 +107,6 @@ model UserCourse {
 }
 
 model Course {
-
-  id             String               @id @default(cuid())
-  code           String               @unique
-  name           String
-  facultyId      String
-  faculty        Faculty              @relation(fields: [facultyId], references: [id])
-  professors     CourseProfessor[]
-  files          CourseFile[]
-  enrollments    UserCourse[]
-  questionGroups QuestionGroup[]
-  corrections    QuestionCorrection[]
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-
   id               String             @id @default(cuid())
   code             String             @unique
   name             String
@@ -130,6 +116,7 @@ model Course {
   files            CourseFile[]
   enrollments      UserCourse[]
   questionGroups   QuestionGroup[]
+  corrections      QuestionCorrection[]
   questionReports  QuestionReport[]
   learningTopics   LearningTopic[]
   questionProgress QuestionProgress[]

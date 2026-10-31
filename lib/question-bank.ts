@@ -3,9 +3,7 @@ import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { logError } from "@/lib/logger";
 
-import { groupCorrectedQuestions, normalizeQuestionText, rankGroups } from "@/lib/question-grouping";
-
-import { groupQuestions, LOW_CONFIDENCE_BELOW, normalizeQuestionText, rankGroups, type RankedGroup } from "@/lib/question-grouping";
+import { groupCorrectedQuestions, LOW_CONFIDENCE_BELOW, normalizeQuestionText, rankGroups, type RankedGroup } from "@/lib/question-grouping";
 
 
 const errorType = (error: unknown) => (error instanceof Error ? error.name : "Unknown");
@@ -58,7 +56,6 @@ export async function rebuildQuestionBank(courseId: string): Promise<RebuildResu
 
       const ranked = rankGroups(groupCorrectedQuestions(questions.map(({ id, fileId, number, text, pinnedToQuestionId, splitOut, file }) => ({ id, fileId, number, text, pinnedToQuestionId, splitOut, year: file.year }))));
 
-      const ranked = rankGroups(groupQuestions(questions.map(({ file, ...question }) => ({ ...question, year: file.year }))));
       decisions = ranked;
 
       await tx.questionGroup.deleteMany({ where: { courseId, normalizedText: { notIn: ranked.map(group => group.normalizedText) } } });

@@ -1,0 +1,4 @@
+.report { margin-top: .5rem; font-size: .95rem; }
+.report summary { width: fit-content; color: var(--muted); font-weight: 600; cursor: pointer; }
+.report summary:hover { color: var(--link); }
+.report form { margin: .75rem 0 .25rem; }

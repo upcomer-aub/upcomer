@@ -53,6 +53,8 @@ model User {
   enrollments         UserCourse[]
   submissions         CourseFile[]         @relation("SubmittedFiles")
   passwordResetTokens PasswordResetToken[]
+  questionReports     QuestionReport[]     @relation("ReportedQuestions")
+  closedReports       QuestionReport[]     @relation("ClosedQuestionReports")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -99,17 +101,18 @@ model UserCourse {
 }
 
 model Course {
-  id             String            @id @default(cuid())
-  code           String            @unique
-  name           String
-  facultyId      String
-  faculty        Faculty           @relation(fields: [facultyId], references: [id])
-  professors     CourseProfessor[]
-  files          CourseFile[]
-  enrollments    UserCourse[]
-  questionGroups QuestionGroup[]
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id              String            @id @default(cuid())
+  code            String            @unique
+  name            String
+  facultyId       String
+  faculty         Faculty           @relation(fields: [facultyId], references: [id])
+  professors      CourseProfessor[]
+  files           CourseFile[]
+  enrollments     UserCourse[]
+  questionGroups  QuestionGroup[]
+  questionReports QuestionReport[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 model CourseProfessor {
@@ -240,9 +243,9 @@ model Question {
 // Identical and near-identical questions of one course (US-15a), ranked by how many papers they appeared in (US-16).
 // Rebuilt by rebuildQuestionBank in lib/question-bank.ts; the papers are the files of its questions.
 model QuestionGroup {
-  id             String     @id @default(cuid())
+  id             String           @id @default(cuid())
   courseId       String
-  course         Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course         Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
   // The question as shown to students: the first source question, without its number or marks.
   text           String
   // Grouping key; unique per course, so a rebuild keeps each group's ID.
@@ -252,9 +255,57 @@ model QuestionGroup {
   // 1 is the most frequent question in the course.
   rank           Int
   questions      Question[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  reports        QuestionReport[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@unique([courseId, normalizedText])
   @@index([courseId, rank])
+}
+
+// What a student says is wrong with a question on the Upcomer Exam (US-23).
+enum QuestionReportReason {
+  // Different questions shown as one, or one question shown twice.
+  WRONG_GROUPING
+  // The text is wrong, cut off, or garbled.
+  WRONG_TEXT
+  NOT_A_QUESTION
+  OTHER
+}
+
+// OPEN reports are the admin queue at /admin/reports. Closing one (US-75) sets closedAt and closedById.
+enum QuestionReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+// One student's report of one question (US-23). The admin queue shows the open reports of a question as one item, and a
+// student cannot open a second report of a question while their first is open; see lib/question-reports.ts.
+model QuestionReport {
+  id           String               @id @default(cuid())
+  courseId     String
+  course       Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Null once a regroup removed the group; questionText still says what was reported.
+  groupId      String?
+  group        QuestionGroup?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  // Null if the student's account was deleted.
+  reporterId   String?
+  reporter     User?                @relation("ReportedQuestions", fields: [reporterId], references: [id], onDelete: SetNull)
+  // The question as the student saw it when reporting.
+  questionText String
+  reason       QuestionReportReason
+  // Optional details from the student, at most 500 characters; shown to admins, never logged.
+  note         String?
+  status       QuestionReportStatus @default(OPEN)
+  closedAt     DateTime?
+  closedById   String?
+  closedBy     User?                @relation("ClosedQuestionReports", fields: [closedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@index([groupId, status])
+  @@index([reporterId])
+  @@index([courseId])
 }

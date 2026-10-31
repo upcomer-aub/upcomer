@@ -3,8 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ConsolidatedExam, ExamQuestion } from "@/lib/consolidated-exam";
 import type { LikelihoodTier } from "@/lib/likelihood-tiers";
 
-const mocks = vi.hoisted(() => ({ getCourseById: vi.fn(), getConsolidatedExam: vi.fn(), notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }) }));
-vi.mock("next/navigation", () => ({ notFound: mocks.notFound }));
+const mocks = vi.hoisted(() => ({
+  getCourseById: vi.fn(), getConsolidatedExam: vi.fn(), getCurrentUser: vi.fn(), notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
+}));
+vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser, requireUser: vi.fn() }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
 vi.mock("@/lib/consolidated-exam", () => ({ getConsolidatedExam: mocks.getConsolidatedExam }));
 import ConsolidatedExamPage from "@/app/courses/[courseId]/exam/page";
@@ -29,12 +32,13 @@ const full = exam([
   question(2, "Consider the network below.\n(a) Find the subnet mask.\n(b) How many hosts fit?", "LIKELY", sixPapers.slice(1, 3), 6),
   question(3, "Define a socket.", "RARE", [sixPapers[4]], 6),
 ], 6);
-const page = async (courseId = course.id) => renderToStaticMarkup(await ConsolidatedExamPage({ params: Promise.resolve({ courseId }) }));
+const page = async (courseId = course.id) => renderToStaticMarkup(await ConsolidatedExamPage({ params: Promise.resolve({ courseId }), searchParams: Promise.resolve({}) }));
 
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockClear());
   mocks.getCourseById.mockReset().mockResolvedValue(course);
   mocks.getConsolidatedExam.mockReset().mockResolvedValue(full);
+  mocks.getCurrentUser.mockReset().mockResolvedValue(null);
 });
 
 describe("consolidated exam page (US-18)", () => {

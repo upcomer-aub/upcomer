@@ -16,7 +16,9 @@ vi.mock("@/lib/db", () => ({ db: {
   $transaction: mocks.transaction,
 } }));
 vi.mock("@/lib/logger", () => ({ logError: mocks.logError }));
-import { getQuestionBank, getQuestionBankFilterOptions, getQuestionBankOverview, parseQuestionBankFilters, rebuildQuestionBank } from "@/lib/question-bank";
+import {
+  getQuestionBank, getQuestionBankFilterOptions, getQuestionBankOverview, MAX_LOGGED_LOW_CONFIDENCE, parseQuestionBankFilters, rebuildQuestionBank,
+} from "@/lib/question-bank";
 
 const failure = (name: string) => Object.assign(new Error("database is down"), { name });
 
@@ -57,6 +59,53 @@ describe("rebuildQuestionBank", () => {
     expect(mocks.deleteGroups).toHaveBeenCalledWith({ where: { courseId: "course-a", normalizedText: { notIn: [] } } });
     expect(mocks.upsertGroup).not.toHaveBeenCalled();
     expect(mocks.updateQuestions).not.toHaveBeenCalled();
+  });
+  it("logs a summary of the grouping decisions after the rebuild commits (US-15b)", async () => {
+    mocks.findCourse.mockResolvedValue({ id: "course-a" });
+    mocks.findQuestions.mockResolvedValue([
+      ...stored,
+      { id: "q5", fileId: "paper-2025", number: 4, text: "What is a socket?", file: { year: 2025 } },
+      { id: "q6", fileId: "paper-2025", number: 5, text: "Describe how ARP works when a host resolves addresses.", file: { year: 2025 } },
+    ]);
+    expect(await rebuildQuestionBank("course-a")).toEqual({ ok: true, groupCount: 3, questionCount: 6 });
+    expect(mocks.updateQuestions).toHaveBeenCalledWith({ where: { id: { in: ["q1", "q2", "q5"] } }, data: { groupId: "group-define a socket" } });
+    expect(mocks.logError).toHaveBeenCalledWith("question_grouping_completed", {
+      courseId: "course-a", questionCount: "6", groupCount: "3", rewordedMatches: "1", lowConfidenceMatches: "0",
+    });
+    expect(mocks.logError).not.toHaveBeenCalledWith("question_grouping_low_confidence", expect.anything());
+  });
+  it("logs each low-confidence match with IDs and the score only", async () => {
+    mocks.findCourse.mockResolvedValue({ id: "course-a" });
+    mocks.findQuestions.mockResolvedValue([
+      { id: "h0", fileId: "paper-a", number: 1, text: "Explain the TCP three-way handshake.", file: { year: 2024 } },
+      { id: "h1", fileId: "paper-b", number: 1, text: "Describe how TCP establishes a connection using the three-way handshake.", file: { year: 2025 } },
+    ]);
+    await rebuildQuestionBank("course-a");
+    expect(mocks.logError).toHaveBeenCalledWith("question_grouping_completed", expect.objectContaining({
+      groupCount: "1", rewordedMatches: "1", lowConfidenceMatches: "1",
+    }));
+    expect(mocks.logError).toHaveBeenCalledWith("question_grouping_low_confidence", { courseId: "course-a", questionId: "h1", matchedQuestionId: "h0", score: "0.75" });
+    const logged = mocks.logError.mock.calls.filter(([event]) => event === "question_grouping_low_confidence");
+    expect(JSON.stringify(logged)).not.toContain("handshake");
+  });
+  it("caps the low-confidence lines at MAX_LOGGED_LOW_CONFIDENCE per rebuild", async () => {
+    mocks.findCourse.mockResolvedValue({ id: "course-a" });
+    const count = MAX_LOGGED_LOW_CONFIDENCE + 5;
+    // Each topic has a short first version and a longer rewording of it, a low-confidence match.
+    mocks.findQuestions.mockResolvedValue(Array.from({ length: count }, (_, index) => [
+      { id: `a${index}`, fileId: "paper-a", number: index + 1, text: `Explain t${index}q alpha.`, file: { year: 2024 } },
+      { id: `b${index}`, fileId: "paper-b", number: index + 1, text: `Explain t${index}q alpha gamma.`, file: { year: 2025 } },
+    ]).flat());
+    await rebuildQuestionBank("course-a");
+    expect(mocks.logError).toHaveBeenCalledWith("question_grouping_completed", expect.objectContaining({ lowConfidenceMatches: String(count) }));
+    expect(mocks.logError.mock.calls.filter(([event]) => event === "question_grouping_low_confidence")).toHaveLength(MAX_LOGGED_LOW_CONFIDENCE);
+  });
+  it("logs no grouping decisions when the rebuild fails", async () => {
+    mocks.findCourse.mockResolvedValue({ id: "course-a" });
+    mocks.findQuestions.mockResolvedValue(stored);
+    mocks.upsertGroup.mockRejectedValue(failure("PrismaClientKnownRequestError"));
+    expect(await rebuildQuestionBank("course-a")).toEqual({ ok: false, error: "unexpected" });
+    expect(mocks.logError).not.toHaveBeenCalledWith("question_grouping_completed", expect.anything());
   });
   it("refuses an unknown course and logs the reason", async () => {
     mocks.findCourse.mockResolvedValue(null);

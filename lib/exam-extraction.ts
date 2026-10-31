@@ -7,7 +7,9 @@ export class ExtractionError extends Error {
 }
 
 // A question starts with a printed number, Q-number, or "Question number".
-const QUESTION_START = /^(?:Q(?:uestion)?\s*\d{1,3}\s*[.):]?|\(\d{1,3}\)|\d{1,3}[.)])(?:\s+\S|$)/i;
+// Some PDFs omit the space after the label. Require a letter in that case so a decimal such as "3.5 Mbps"
+// or a time such as "1:20" in a wrapped question is never mistaken for another question.
+const QUESTION_START = /^(?:Q(?:uestion)?\s*\d{1,3}\s*[.):]?|\(\d{1,3}\)|\d{1,3}[.):])(?:\s+\S|(?<=[.):])(?=\p{L})|$)/iu;
 
 // Page furniture that is not part of any question: printed page numbers ("Page 1 of 2", "- 3 -") and the one-line
 // watermark phone scanner apps stamp on a scanned page ("Scanned with CamScanner").

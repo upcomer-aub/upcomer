@@ -383,6 +383,27 @@ The service is `lib/question-corrections.ts` with messages in `lib/question-corr
 
 Exam uploads and published exam submissions now run PDF text extraction, store numbered questions, and rebuild the course's question bank. Each attempt is saved as a processing run. Admins can see its stage and reason, then retry failures at `/admin/processing`. Image-only PDFs fail with "No extractable text"; unreadable PDFs fail separately. Existing questions on older files are kept and regrouped. Load tests: `npm run load -- ordered-exam` and `npm run load -- exam-upload`. `PIPELINE_INTEGRATION_REPORT.md` records the earlier test results, before extraction was connected.
 
+### Sprint 3 extraction and failed-processing checks (Ali Slim)
+
+Typed PDFs support numbered, parenthesized, Q-number and Question-number labels, including compact labels (`2)Explain`) and colon labels (`1: Explain`). Decimals and times in continuation lines stay inside their question. Page numbers, scanner watermarks, section headings and numbered instructions are handled by the existing cross-test fixes. Image-only scans need a typed/searchable replacement; OCR is not implemented.
+
+`/admin/processing` shows each file's latest result. A retry creates a new run and preserves the failed attempt. Simultaneous retries are serialized per file, and a retry of failed grouping reuses existing question rows. A run still marked running after 15 minutes can be retried. Database failures while reading a retry now return a controlled error; failures to save a failed-run record are logged separately.
+
+A retry applies to the attempt displayed on the page. If another tab or admin already retried it, the old form is refused even if that newer attempt has also failed. Reload the page before deliberately retrying the latest attempt. Compact question labels must include punctuation, so a variable such as `Q2value` remains question content.
+
+Processing events appear in `/admin/monitoring` through the shared logger:
+
+| Event | Level | Meaning |
+| --- | --- | --- |
+| `exam_processing_started` | info | File/course/run IDs and whether this is a retry |
+| `exam_processing_completed` | info | Those IDs, retry flag, question count and elapsed milliseconds |
+| `exam_processing_failed` | error | Failed stage, safe reason, error type, retry flag and elapsed time when a run started |
+| `exam_processing_record_failed` | error | The failed-run status could not be saved |
+| `exam_processing_retrieval_failed` | error | Loading the processing list failed |
+| `exam_retry_refused` | warn | No failed/stale run, or the file is no longer eligible |
+
+Question text, titles, original file names and error messages are never included in these events. `tests/e2e/exam-processing-reliability.spec.ts` runs 50 seeded extraction trials and 50 admin-page retry trials against a production build, checking both database results and persisted monitoring events. It cleans up its course and upload copies. Ali Slim's US-15b/US-23 database cross-tests are in `tests/integration/cross-test-us15b-us23.test.ts`; run them with `npm run test:integration`. Results and limitations are in `MEMBER_5_SPRINT_3_IMPLEMENTATION_REPORT.md` and `CROSS_TEST_ALI_SLIM_US15B_US23.md`.
+
 ## Accuracy evaluation set (US-93)
 
 A hand-checked set of exam questions with their correct ("gold") groups measures how well grouping (US-15a) and ranking (US-16) work, and catches regressions when the grouping logic changes, or later its model or prompt (US-15b).

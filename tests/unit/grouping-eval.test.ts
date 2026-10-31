@@ -9,11 +9,11 @@ import {
 const set = (papers: EvalDataset["papers"], extra: Partial<EvalDataset> = {}): EvalDataset => ({ name: "toy", version: 1, description: "", papers, ...extra });
 const paper = (id: string, year: number, questions: Array<[string, string]>, course = "c") => ({ id, course, title: id, year, questions });
 
-// Gold: A is asked in 3 papers, once reworded ("Describe"), which the rules cannot see; B is in 2 papers.
+// Gold: A is asked in 3 papers, once with its acronym expanded, which the rules cannot see; B is in 2 papers.
 const toy = set([
   paper("p1", 2024, [["A", "1. Explain TCP."], ["B", "2. Define UDP."]]),
   paper("p2", 2023, [["A", "1) explain tcp"], ["B", "2. Define UDP. (5 points)"]]),
-  paper("p3", 2022, [["A", "1. Describe TCP."]]),
+  paper("p3", 2022, [["A", "1. Explain the Transmission Control Protocol."]]),
 ]);
 
 describe("evaluateGrouping", () => {
@@ -39,13 +39,13 @@ describe("evaluateGrouping", () => {
     const perfect: Grouper = {
       name: "gold", version: "test",
       group: questions => [...new Set(questions.map(question => (question.text.includes("UDP") ? "B" : "A")))]
-        .map(key => ({ normalizedText: key, text: key, questions: questions.filter(question => (question.text.includes("UDP") ? "B" : "A") === key) })),
+        .map(key => ({ normalizedText: key, text: key, reworded: [], questions: questions.filter(question => (question.text.includes("UDP") ? "B" : "A") === key) })),
     };
     expect(Object.values(evaluateGrouping(toy, perfect).metrics)).toEqual([1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("charges precision for a merge of different questions", () => {
-    const everything: Grouper = { name: "one", version: "test", group: questions => [{ normalizedText: "x", text: "x", questions }] };
+    const everything: Grouper = { name: "one", version: "test", group: questions => [{ normalizedText: "x", text: "x", questions, reworded: [] }] };
     const { metrics, comparisons } = evaluateGrouping(toy, everything);
     // 10 predicted pairs, 4 right.
     expect(metrics.pairPrecision).toBe(0.4);

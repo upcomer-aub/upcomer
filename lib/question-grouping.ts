@@ -2,7 +2,7 @@
 // input always gives the same groups in the same order.
 
 // "Q3.", "Question 2)", "3." or "(4)" at the start, and marks such as "(10 points)" or "[5 marks]" anywhere.
-const LEADING_NUMBER = /^\s*(?:(?:question|q)\s*\d+[a-z]?\s*[.):-]?|\d+[a-z]?\s*[.)]|\(\d+[a-z]?\))(?:\s+|$)/i;
+const LEADING_NUMBER = /^\s*(?:(?:question|q)\s*\d+[a-z]?\s*[.):-]?|\d+[a-z]?\s*[.):]|\(\d+[a-z]?\))(?:\s+|(?<=[.):])(?=\p{L})|$)/iu;
 const MARKS = /[([]\s*\d+(?:\.\d+)?\s*(?:points?|pts?|marks?)\s*[)\]]/gi;
 // Sentence punctuation is ignored; math symbols (+ - * / = < > ^ %) are kept, so "a+b" and "a-b" stay different questions.
 const PROSE_PUNCTUATION = /[.,;:!?'"`´‘’“”()[\]{}…]/g;
@@ -153,6 +153,11 @@ export function questionFeatures(text: string): QuestionFeatures {
   const words: string[] = [];
   const numbers: string[] = [];
   const math: string[] = [];
+  // These numbers define what must be solved, rather than sample measurements. Losing them merges different
+  // subnetting tasks or accuracy requirements (US-93 cross-test). Keep their original decimal punctuation too.
+  const cleaned = cleanQuestionText(expanded).toLowerCase();
+  for (const match of cleaned.matchAll(/\b(\d+)\s+(?:equal\s+)?subnets?\b/g)) math.push(`subnets:${match[1]}`);
+  for (const match of cleaned.matchAll(/\b(?:within|accuracy(?:\s+of)?|tolerance(?:\s+of)?)\s+(\d+(?:\.\d+)?)/g)) math.push(`accuracy:${match[1]}`);
   const negations: string[] = [];
   let computes = false;
   let explains = false;
@@ -307,7 +312,7 @@ export function groupCorrectedQuestions(questions: CorrectedQuestion[]): Grouped
   const groups = groupQuestions(questions.filter(question => !question.splitOut && !followsPin(question)));
   for (const question of [...split].sort(byPaperThenPosition)) {
     const key = keyOf(question);
-    if (key) groups.push({ normalizedText: splitGroupKey(key, question.id), text: cleanQuestionText(question.text), questions: [question] });
+    if (key) groups.push({ normalizedText: splitGroupKey(key, question.id), text: cleanQuestionText(question.text), questions: [question], reworded: [] });
   }
   const groupOf = new Map(groups.flatMap(group => group.questions.map(question => [question.id, group] as const)));
   for (const question of [...pinned].sort(byPaperThenPosition)) groupOf.get(roots.get(question.id)!.id)?.questions.push(question);

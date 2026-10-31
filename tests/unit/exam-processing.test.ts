@@ -19,7 +19,7 @@ vi.mock("@/lib/question-bank", () => ({ rebuildQuestionBank: mocks.rebuild }));
 vi.mock("@/lib/logger", () => ({ logError: mocks.log }));
 import { ExtractionError } from "@/lib/exam-extraction";
 import { FileUnavailableError } from "@/lib/files";
-import { canRetryRun, processExamFile, retryFailedExam } from "@/lib/exam-processing";
+import { canRetryRun, getExamProcessingRuns, processExamFile, retryFailedExam } from "@/lib/exam-processing";
 
 beforeEach(() => {
   for (const mock of [mocks.file.findUnique, mocks.file.findMany, mocks.run.create, mocks.run.update, mocks.run.findFirst,
@@ -35,6 +35,17 @@ beforeEach(() => {
 });
 
 describe("exam processing and retry", () => {
+  it("refuses a stale displayed run even if the newer run has also failed", async () => {
+    mocks.run.findFirst.mockResolvedValue({ id: "new-run", status: "FAILED" });
+    expect(await retryFailedExam("file-a", "old-run")).toEqual({ ok: false, reason: "not_failed" });
+    expect(mocks.run.create).not.toHaveBeenCalled();
+  });
+  it("refuses a queued retry when another attempt has already run and failed again", async () => {
+    mocks.run.findFirst.mockResolvedValueOnce({ id: "old-run", status: "FAILED" })
+      .mockResolvedValueOnce({ id: "new-failed-run", status: "FAILED" });
+    expect(await retryFailedExam("file-a")).toEqual({ ok: false, reason: "not_failed" });
+    expect(mocks.run.create).not.toHaveBeenCalled();
+  });
   it("stores extracted questions, groups them, and records success", async () => {
     expect(await processExamFile("file-a")).toEqual({ ok: true, runId: "run-a", questionCount: 2 });
     expect(mocks.createQuestions).toHaveBeenCalledWith({ data: [
@@ -49,6 +60,46 @@ describe("exam processing and retry", () => {
     mocks.extract.mockRejectedValue(new ExtractionError("no_text"));
     expect(await processExamFile("file-a")).toMatchObject({ ok: false, reason: "no_text" });
     expect(mocks.run.update).toHaveBeenCalledWith({ where: { id: "run-a" }, data: { status: "FAILED", stage: "EXTRACTION", reason: "no_text" } });
+    expect(mocks.createQuestions).not.toHaveBeenCalled();
+  });
+
+  it("logs a successful retry with IDs, count and elapsed time, without the extracted text", async () => {
+    mocks.run.findFirst.mockResolvedValue({ status: "FAILED" });
+    await retryFailedExam("file-a");
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_started", { fileId: "file-a", courseId: "course-a", runId: "run-a", retry: "true" });
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_completed", expect.objectContaining({ retry: "true", questionCount: "2", durationMs: expect.any(String) }));
+    expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("First question");
+  });
+
+  it("returns a controlled retry failure when the latest run cannot be read", async () => {
+    mocks.run.findFirst.mockRejectedValue(new Error("private database connection details"));
+    expect(await retryFailedExam("file-a")).toEqual({ ok: false, reason: "unexpected" });
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_failed", { fileId: "file-a", retry: "true", reason: "unexpected", errorType: "Error" });
+    expect(mocks.run.create).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("private");
+  });
+
+  it("logs a failed status save instead of silently hiding it", async () => {
+    mocks.extract.mockRejectedValue(new ExtractionError("no_text"));
+    mocks.run.update.mockRejectedValue(new Error("private database details"));
+    expect(await processExamFile("file-a")).toMatchObject({ ok: false, reason: "no_text" });
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_record_failed", expect.objectContaining({ runId: "run-a", stage: "EXTRACTION", reason: "no_text", errorType: "Error" }));
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_failed", expect.objectContaining({ reason: "no_text" }));
+    expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("private");
+  });
+
+  it("logs a processing-list read failure and lets the error page handle it", async () => {
+    mocks.file.findMany.mockRejectedValue(new Error("private database details"));
+    await expect(getExamProcessingRuns()).rejects.toThrow();
+    expect(mocks.log).toHaveBeenCalledWith("exam_processing_retrieval_failed", { errorType: "Error" });
+  });
+
+  it("retains extracted question IDs when retrying only the failed grouping stage", async () => {
+    mocks.countQuestions.mockResolvedValue(2);
+    mocks.run.findFirst.mockResolvedValue({ status: "FAILED", stage: "GROUPING" });
+    expect(await retryFailedExam("file-a")).toMatchObject({ ok: true, questionCount: 2 });
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(mocks.deleteQuestions).not.toHaveBeenCalled();
     expect(mocks.createQuestions).not.toHaveBeenCalled();
   });
 

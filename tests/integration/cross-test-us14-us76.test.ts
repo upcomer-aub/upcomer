@@ -168,6 +168,18 @@ describe("US-14: an image-only PDF fails with \"no extractable text\"", () => {
 });
 
 describe("US-76: failed runs show the stage and reason, and retry works", () => {
+  it("starts only one queued retry when the replacement PDF still fails immediately", async () => {
+    const courseId = await newCourse();
+    const { fileId } = await uploadExam(courseId, imageOnlyPdf(), "still-scanned.pdf");
+    const expectedRunId = (await runsOf(fileId))[0].id;
+    const results = await Promise.all(Array.from({ length: 5 }, () => retryFailedExam(fileId, expectedRunId)));
+    expect(results.filter(result => "runId" in result)).toHaveLength(1);
+    expect(results.filter(result => result.reason === "not_failed")).toHaveLength(4);
+    expect((await runsOf(fileId)).map(run => run.status)).toEqual(["FAILED", "FAILED"]);
+    // A deliberate later retry is still allowed; the new snapshot refers to the second failed attempt.
+    expect(await retryFailedExam(fileId)).toMatchObject({ ok: false, reason: "no_text" });
+    expect(await runsOf(fileId)).toHaveLength(3);
+  });
   it("retries an image-only exam after the admin replaces the file, and the exam then joins the ordered exam", async () => {
     const courseId = await newCourse();
     const { fileId } = await uploadExam(courseId, imageOnlyPdf(), "scan.pdf");

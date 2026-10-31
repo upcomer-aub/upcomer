@@ -4,6 +4,11 @@ import { corruptPdf, imageOnlyPdf, textPdf } from "@/tests/integration/fixtures/
 import { SAMPLE_EXAMS, samplePdf } from "@/tests/integration/fixtures/sample-exams";
 
 describe("automatic exam extraction", () => {
+  it("does not split a wrapped question at a variable beginning with Q and a number", async () => {
+    expect(await extractExamQuestions(textPdf([["1. Explain the relation.", "Q2value is the measured charge.", "2. Define latency."]]))).toEqual([
+      "1. Explain the relation.\nQ2value is the measured charge.", "2. Define latency.",
+    ]);
+  });
   it("reads every sample paper used by the exam pipeline", async () => {
     for (const exam of SAMPLE_EXAMS) {
       expect(await extractExamQuestions(samplePdf(exam))).toEqual(exam.questions);
@@ -30,6 +35,13 @@ describe("automatic exam extraction", () => {
 
   it("reports no extractable text for an image-only PDF", async () => {
     await expect(extractExamQuestions(imageOnlyPdf())).rejects.toMatchObject({ reason: "no_text" });
+  });
+
+  it("extracts compact labels and colon labels without splitting decimals, times, or sub-parts", async () => {
+    expect(await extractExamQuestions(textPdf([["1: Define latency.", "2)Explain throughput.", "3.5 Mbps is the link speed.", "1:20 is the start time.", "(a) Give units.", "(3)Describe jitter.", "Q4.Explain ARP."]]))).toEqual([
+      "1: Define latency.", "2)Explain throughput.\n3.5 Mbps is the link speed.\n1:20 is the start time.\n(a) Give units.",
+      "(3)Describe jitter.", "Q4.Explain ARP.",
+    ]);
   });
 
   it("reports an unreadable PDF", async () => {

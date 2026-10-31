@@ -91,6 +91,34 @@ A second comparison with the plan checked US-14/US-76 behavior, monitoring, the 
 
 The second pass passed all 938 unit/component tests, 91 integration tests, 85 browser tests, both 50-trial reliability checks, lint, TypeScript, the production build and the unchanged grouping-accuracy thresholds. The added two-tab browser regression passed. Cleanup checks found zero remaining courses, files, students or faculties under the `slim-`, `qa-proc-` and `it-m4-` test prefixes, and the temporary database was stopped again.
 
+## Final requirement-by-requirement audit
+
+The third pass compared the actual Sprint 3 plan with the implementation, test assertions, saved full-suite results and branch history. No further application-code changes were needed. Application and test source still match `7075bb7`, the commit validated by the full second-pass runs. Lint, TypeScript and the committed grouping evaluation were checked again; the unchanged full database/browser suites were not rerun merely to repeat their results.
+
+| Requested or assigned work | Completion and evidence |
+| --- | --- |
+| Create a new implementation branch from main | Complete: `ali_slim_sprint_3`, based on `62dae61`; main unchanged |
+| US-14: correct typed-PDF question count and content | Complete for supported numbered text layouts: real-PDF unit tests and `cross-test-us14-us76.test.ts`; published uploads feed the ranked exam |
+| US-14: image-only PDF fails with no extractable text | Complete: database and browser assertions check `no_text`, its displayed reason, and no stored questions |
+| US-14: earlier extraction defects are gone | Regression checks cover page furniture, scanner watermarks, section headings, numbered instructions, split text items, wrapped questions and sub-parts |
+| US-76: show file, failed stage and reason | Complete: admin processing page, page tests and `admin-exam-processing.spec.ts` |
+| US-76: retry creates a new run and updates the list | Complete: missing/replaced files, successful and unsuccessful retries, preserved history, stale/racing requests and access control are tested |
+| Monitor extraction, failed-run records and retry outcomes | Complete: start/completion/refusal/error events; unit checks for failure-record/read errors; production reliability tests verify persisted successful and failed retry events |
+| Cross-test US-15b | Automated cross-tests complete: rewording, changed sample values, distinct same-topic questions, course isolation, stable rebuilding and unchanged US-93 acceptance thresholds |
+| Cross-test US-23 | Automated cross-tests complete: actual question/course in the admin queue, two students in one queue item, duplicate/racing report refusal, invalid input and report snapshots after regrouping |
+| Run 50 randomized production-build trials per owned feature | Complete: US-14 50/50 and US-76 50/50, with fixed seeds and case counts above |
+| Test the implementation and retain regressions | Complete: latest full runs passed 938 unit/component, 91 integration and 85 browser tests; build, lint, types, accuracy and schema checks passed |
+| Report what changed, shared files, results and unfinished items | Complete: this report, the separate cross-test report and README; no supplied PDF or project dependency changes |
+| Ali Slim's demo step | Locally exercised by the production browser tests: typed upload, scanned failure, visible reason, file repair and successful retry; live deployed presentation remains a team activity |
+
+The original request's local coding, automated testing and reporting work is complete. This does **not** mark every row of the sprint's team Definition of Done complete:
+
+- Mohammed's independent acceptance and a teammate's PR approval are still pending; rerunning tests cannot supply their personal sign-off.
+- Ali Slim's review of the AI-assisted code and results is still pending.
+- Remote CI, merging, branch-rule enforcement and the deployed full-sprint journey remain unverified. No push, PR, merge, repository-setting change or deployment was requested or performed.
+- Jira status and the live review/demo were not updated or performed.
+- No private real-paper accuracy set was supplied. The assigned accuracy check passed on the available versioned synthetic set; no claim of arbitrary real-paper accuracy is made.
+
 ## Files touched outside Ali Slim's extraction/processing files
 
 - `lib/logger.ts`: event-union repair and processing monitoring events/levels.

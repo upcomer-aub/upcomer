@@ -84,8 +84,7 @@ export const EXPECTED_EXAM = {
   sections: [["VERY_LIKELY", 2], ["LIKELY", 2], ["RARE", 4]],
 } as const;
 
-// Uploads that must not add anything to the ordered exam. Once US-76 records processing runs, each must end as a failed
-// run with this reason.
+// Uploads that must not add anything to the ordered exam. Each ends in a failed processing run.
 export const FAILING_SAMPLES = [
   { title: "Scanned Final", fileName: "scanned-final.pdf", bytes: imageOnlyPdf(), reason: "no_text" },
   { title: "Broken Final", fileName: "broken-final.pdf", bytes: corruptPdf(), reason: "unreadable_pdf" },

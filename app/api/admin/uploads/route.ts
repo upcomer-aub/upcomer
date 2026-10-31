@@ -1,5 +1,6 @@
 import { getAdminUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import { processExamFile } from "@/lib/exam-processing";
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/upload-rules";
 import { parseUploadForm, saveUpload, UploadError } from "@/lib/uploads";
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   try {
     const { file, ...fields } = parseUploadForm(form);
     const record = await saveUpload({ ...fields, fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+    if (record.category === "EXAM") await processExamFile(record.id);
     return Response.json({ file: { id: record.id, title: record.title, category: record.category, courseId: record.courseId, url: `/files/${encodeURIComponent(record.id)}` } }, { status: 201 });
   } catch (error) {
     if (error instanceof UploadError) {

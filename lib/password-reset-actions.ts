@@ -1,13 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { requestPasswordReset, resetPassword } from "@/lib/password-reset";
 
 const field = (formData: FormData, name: string) => String(formData.get(name) ?? "");
 
 // Always the same answer, whether or not the email is registered or was limited.
 export async function requestResetAction(formData: FormData) {
-  await requestPasswordReset(field(formData, "email"));
+  const email = field(formData, "email");
+  after(() => requestPasswordReset(email));
   redirect("/forgot-password?sent=1");
 }
 

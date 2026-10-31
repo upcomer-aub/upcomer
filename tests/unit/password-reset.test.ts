@@ -90,6 +90,20 @@ describe("requestPasswordReset (acceptance test 1)", () => {
     expect(logged()).toContainEqual(expect.objectContaining({ event: "password_reset_email_failed", level: "error", userId: "user-a", reason: "not_configured" }));
     expect(JSON.stringify(logged())).not.toMatch(/lina|token=/i);
   });
+  it("waits for the email send before finishing the request", async () => {
+    let finishSend!: () => void;
+    const pendingSend = new Promise<void>(resolve => { finishSend = resolve; });
+    send.mockImplementationOnce(async mail => { sent.push(mail); await pendingSend; });
+    let finished = false;
+    const request = requestPasswordReset(student.email, { now, send }).then(() => { finished = true; });
+    await settle();
+    expect(send).toHaveBeenCalledOnce();
+    expect(finished).toBe(false);
+    finishSend();
+    await request;
+    expect(finished).toBe(true);
+    expect(logged()).toContainEqual(expect.objectContaining({ event: "password_reset_requested", outcome: "sent" }));
+  });
   it("creates no link when the site address is unknown", async () => {
     vi.stubEnv("APP_URL", "");
     await requestPasswordReset(student.email, { now, send });

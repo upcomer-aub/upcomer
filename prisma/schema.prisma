@@ -53,10 +53,14 @@ model User {
   enrollments         UserCourse[]
   submissions         CourseFile[]         @relation("SubmittedFiles")
   passwordResetTokens PasswordResetToken[]
+
+  questionCorrections QuestionCorrection[]
+
   questionReports     QuestionReport[]     @relation("ReportedQuestions")
   closedReports       QuestionReport[]     @relation("ClosedQuestionReports")
   learningTopics      LearningTopic[]
   questionProgress    QuestionProgress[]
+
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -103,6 +107,20 @@ model UserCourse {
 }
 
 model Course {
+
+  id             String               @id @default(cuid())
+  code           String               @unique
+  name           String
+  facultyId      String
+  faculty        Faculty              @relation(fields: [facultyId], references: [id])
+  professors     CourseProfessor[]
+  files          CourseFile[]
+  enrollments    UserCourse[]
+  questionGroups QuestionGroup[]
+  corrections    QuestionCorrection[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
   id               String             @id @default(cuid())
   code             String             @unique
   name             String
@@ -117,6 +135,7 @@ model Course {
   questionProgress QuestionProgress[]
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+
 }
 
 model CourseProfessor {
@@ -148,39 +167,64 @@ enum FileStatus {
 }
 
 model CourseFile {
-  id               String       @id @default(cuid())
+  id               String              @id @default(cuid())
   courseId         String
-  course           Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course           Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
   professorId      String?
-  professor        Professor?   @relation(fields: [professorId], references: [id], onDelete: SetNull)
+  professor        Professor?          @relation(fields: [professorId], references: [id], onDelete: SetNull)
   title            String
   originalFileName String
   storageKey       String
   category         FileCategory
   year             Int?
   termId           String?
-  term             Term?        @relation(fields: [termId], references: [id], onDelete: SetNull)
+  term             Term?               @relation(fields: [termId], references: [id], onDelete: SetNull)
   examType         ExamType?
   topic            String?
   mimeType         String?
   sizeBytes        Int?
   // Admin uploads and files from before US-13 are PUBLISHED; student submissions start as PENDING.
-  status           FileStatus   @default(PUBLISHED)
+  status           FileStatus          @default(PUBLISHED)
   // The student who submitted the file; null for admin uploads.
   submittedById    String?
-  submittedBy      User?        @relation("SubmittedFiles", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedBy      User?               @relation("SubmittedFiles", fields: [submittedById], references: [id], onDelete: SetNull)
   // Shown to the submitter; set only when the status is REJECTED.
   rejectionReason  String?
   // When an admin published or rejected the submission.
   reviewedAt       DateTime?
   questions        Question[]
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  processingRuns   FileProcessingRun[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   @@index([courseId, category])
   @@index([termId])
   @@index([status, createdAt])
   @@index([submittedById])
+}
+
+enum ProcessingStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum ProcessingStage {
+  EXTRACTION
+  GROUPING
+}
+
+model FileProcessingRun {
+  id        String           @id @default(cuid())
+  fileId    String
+  file      CourseFile       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  status    ProcessingStatus @default(RUNNING)
+  stage     ProcessingStage  @default(EXTRACTION)
+  reason    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([fileId, createdAt])
 }
 
 enum LogLevel {
@@ -204,19 +248,58 @@ model LogEntry {
 
 // One question extracted from an exam paper (written by US-14's extraction). Its course is always the paper's course.
 model Question {
-  id        String         @id @default(cuid())
-  fileId    String
-  file      CourseFile     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  id                 String               @id @default(cuid())
+  fileId             String
+  file               CourseFile           @relation(fields: [fileId], references: [id], onDelete: Cascade)
   // Position of the question in its paper, from 1.
-  number    Int
-  text      String
-  groupId   String?
-  group     QuestionGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  number             Int
+  text               String
+  groupId            String?
+  group              QuestionGroup?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  // Admin corrections (question corrections). They are kept when the question bank is rebuilt:
+  // a pinned question always joins the group of the question it is pinned to, and a split question stays in a group of its own.
+  pinnedToQuestionId String?
+  pinnedTo           Question?            @relation("QuestionPin", fields: [pinnedToQuestionId], references: [id], onDelete: SetNull)
+  pinnedQuestions    Question[]           @relation("QuestionPin")
+  splitOut           Boolean              @default(false)
+  // Set when an admin corrected the extracted text.
+  textCorrectedAt    DateTime?
+  corrections        QuestionCorrection[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   @@unique([fileId, number])
   @@index([groupId])
+  @@index([pinnedToQuestionId])
+}
+
+enum CorrectionKind {
+  EDIT_TEXT
+  MOVE
+  SPLIT
+  RESET
+}
+
+// The activity log of admin corrections to extracted questions. Each row keeps a readable copy of what changed, so it still
+// makes sense after the question, its paper, or the admin is deleted.
+model QuestionCorrection {
+  id             String         @id @default(cuid())
+  courseId       String
+  course         Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questionId     String?
+  question       Question?      @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  adminId        String?
+  admin          User?          @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  kind           CorrectionKind
+  paperTitle     String
+  questionNumber Int
+  // EDIT_TEXT: the old and new text. MOVE: the old and new group's text. SPLIT and RESET: the old group's text.
+  before         String?
+  after          String?
+  createdAt      DateTime       @default(now())
+
+  @@index([courseId, createdAt])
+  @@index([questionId, createdAt])
 }
 
 // Identical and near-identical questions of one course (US-15a), ranked by how many papers they appeared in (US-16).

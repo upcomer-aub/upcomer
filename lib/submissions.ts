@@ -3,7 +3,7 @@ import path from "node:path";
 import { db } from "@/lib/db";
 import { fileMetadataMessage } from "@/lib/file-metadata-rules";
 import { logError } from "@/lib/logger";
-import { rebuildQuestionBank } from "@/lib/question-bank";
+import { processExamFile } from "@/lib/exam-processing";
 import { MAX_UPLOAD_LABEL } from "@/lib/upload-rules";
 import { saveUpload, UploadError, validateUploadFile, type UploadInput } from "@/lib/uploads";
 
@@ -103,8 +103,7 @@ async function review(fileId: string, operation: "publish" | "reject", data: { s
     const file = await db.courseFile.findUnique({ where: { id: fileId }, select: { id: true, courseId: true, category: true } });
     if (!file) return { ok: false, error: "not_found" };
     if (count === 0) return { ok: false, error: "not_pending" };
-    // A published exam joins the question bank; rebuildQuestionBank logs its own failures and never throws.
-    if (operation === "publish" && file.category === FileCategory.EXAM) await rebuildQuestionBank(file.courseId);
+    if (operation === "publish" && file.category === FileCategory.EXAM) await processExamFile(file.id);
     return { ok: true, id: file.id, courseId: file.courseId };
   } catch (error) {
     logError("submission_review_failed", { fileId, operation, errorType: errorType(error) });

@@ -5,7 +5,7 @@ import path from "node:path";
 
 // US-92: the exam pipeline end to end against a real database, with the real upload route, the real stored files,
 // the real grouping and ranking, and the real consolidated ordered exam. Only the admin session is faked, and
-// extraction (US-14, not on main yet) is the stand-in in fixtures/pipeline.ts.
+// extraction (US-14) and processing runs (US-76) are part of the real upload flow.
 
 const { getAdminUser } = vi.hoisted(() => ({ getAdminUser: vi.fn() }));
 vi.mock("@/lib/auth", async original => ({ ...(await original<typeof import("@/lib/auth")>()), getAdminUser }));
@@ -18,7 +18,7 @@ import { rebuildQuestionBank } from "@/lib/question-bank";
 import { isNearIdentical, normalizeQuestionText } from "@/lib/question-grouping";
 import { publishSubmission, rejectSubmission } from "@/lib/submissions";
 import { EXPECTED_EXAM, FAILING_SAMPLES, SAMPLE_EXAMS, samplePdf, type SampleExam } from "./fixtures/sample-exams";
-import { extractQuestions, processExam } from "./fixtures/pipeline";
+import { extractQuestions } from "./fixtures/pipeline";
 
 const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const faculty = { id: `it-pipe-faculty-${stamp}`, code: `IPF${stamp}`.toUpperCase().slice(0, 20), name: "Pipeline Faculty" };
@@ -51,11 +51,14 @@ async function uploadSample(courseId: string, exam: SampleExam) {
   const saved = await db.courseFile.findUniqueOrThrow({ where: { id: file.id } });
   expect(saved).toMatchObject({ courseId, status: "PUBLISHED", category: "EXAM", year: exam.year, examType: exam.examType, mimeType: "application/pdf" });
   expect(Buffer.compare(await readFile(path.join(root, saved.storageKey)), Buffer.from(bytes))).toBe(0);
+  const questions = await db.question.findMany({ where: { fileId: file.id }, orderBy: { number: "asc" } });
+  expect(questions.map(question => question.text)).toEqual(exam.questions);
+  expect((await db.fileProcessingRun.findFirst({ where: { fileId: file.id }, orderBy: { createdAt: "desc" } }))?.status).toBe("SUCCEEDED");
   return file.id as string;
 }
 
 async function uploadAndProcess(courseId: string, exams: SampleExam[]) {
-  for (const exam of exams) expect(await processExam(await uploadSample(courseId, exam), exam.questions)).toMatchObject({ ok: true });
+  for (const exam of exams) await uploadSample(courseId, exam);
   return getConsolidatedExam(courseId);
 }
 
@@ -146,8 +149,7 @@ describe.sequential("exam pipeline end to end", () => {
 
   it("ends in the expected exam when all five papers are uploaded and regrouped at the same moment", async () => {
     const courseId = await newCourse();
-    const results = await Promise.all(SAMPLE_EXAMS.map(async exam => processExam(await uploadSample(courseId, exam), exam.questions)));
-    expect(results.every(result => result.ok)).toBe(true);
+    await Promise.all(SAMPLE_EXAMS.map(exam => uploadSample(courseId, exam)));
     // Each regroup holds the course lock, so the last one to run saw every paper.
     expectSampleExam(await getConsolidatedExam(courseId));
   });
@@ -169,15 +171,23 @@ describe.sequential("exam pipeline end to end", () => {
       const response = await upload(uploadRequest({ category: "EXAM", courseId, title: sample.title }, { name: sample.fileName, bytes: sample.bytes }));
       // They start with %PDF-, so the upload check lets them through; only extraction can tell they have no text.
       expect(response.status).toBe(201);
-      // With no text, extraction finds no questions.
-      await extractQuestions((await response.json()).file.id, []);
+      const fileId = (await response.json()).file.id;
+      expect(await db.question.count({ where: { fileId } })).toBe(0);
+      expect(await db.fileProcessingRun.findFirst({ where: { fileId }, orderBy: { createdAt: "desc" } })).toMatchObject({ status: "FAILED", stage: "EXTRACTION", reason: sample.reason });
     }
     await rebuildQuestionBank(courseId);
     expectSampleExam(await getConsolidatedExam(courseId));
   });
 
-  it.todo("marks an image-only PDF's run as failed with the reason no_text (acceptance test 2; needs US-76 processing runs and US-14 extraction)");
-  it.todo("marks a corrupt PDF's run as failed with the reason unreadable_pdf (needs US-76 and US-14)");
+  it("retries a failed image-only PDF and records another failed attempt", async () => {
+    const courseId = await newCourse();
+    const sample = FAILING_SAMPLES[0];
+    const response = await upload(uploadRequest({ category: "EXAM", courseId, title: sample.title }, { name: sample.fileName, bytes: sample.bytes }));
+    const fileId = (await response.json()).file.id;
+    const { retryFailedExam } = await import("@/lib/exam-processing");
+    expect(await retryFailedExam(fileId)).toMatchObject({ ok: false, reason: "no_text" });
+    expect(await db.fileProcessingRun.count({ where: { fileId, status: "FAILED" } })).toBe(2);
+  });
 
   it("leaves out a pending or rejected student submission, and takes a submission in once it is published", async () => {
     const courseId = await newCourse();
@@ -211,7 +221,8 @@ describe.sequential("exam pipeline end to end", () => {
     await uploadAndProcess(courseId, SAMPLE_EXAMS);
     const response = await upload(uploadRequest({ category: "MATERIAL", courseId, title: "Lecture Notes" }, { name: "notes.pdf", bytes: samplePdf(SAMPLE_EXAMS[0]) }));
     expect(response.status).toBe(201);
-    await processExam((await response.json()).file.id, SAMPLE_EXAMS[0].questions);
+    await extractQuestions((await response.json()).file.id, SAMPLE_EXAMS[0].questions);
+    await rebuildQuestionBank(courseId);
     expectSampleExam(await getConsolidatedExam(courseId));
   });
 
@@ -277,9 +288,8 @@ describe.sequential("exam pipeline end to end", () => {
     for (let paper = 0; paper < 20; paper++) {
       const exam: SampleExam = { title: `Paper ${paper}`, year: 2005 + paper, examType: "FINAL", fileName: `paper-${paper}.pdf`, header: [`Paper ${paper}`], questions: topics.slice(paper, paper + 25).map((text, index) => `${index + 1}. ${text}`) };
       let started = performance.now();
-      const fileId = await uploadSample(courseId, exam);
+      await uploadSample(courseId, exam);
       timings.upload.push(performance.now() - started);
-      await extractQuestions(fileId, exam.questions);
       started = performance.now();
       expect(await rebuildQuestionBank(courseId)).toMatchObject({ ok: true });
       timings.regroup.push(performance.now() - started);

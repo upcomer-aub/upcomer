@@ -77,7 +77,8 @@ type LogEvent =
   | "question_progress_retrieval_failed"
   | "question_progress_saved"
   | "question_progress_refused"
-  | "question_progress_rate_limited";
+  | "question_progress_rate_limited"
+  | "priority_calculation_failed";
 
 
 export type { LogEvent };
@@ -183,6 +184,8 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   question_progress_saved: "info",
   question_progress_refused: "warn",
   question_progress_rate_limited: "warn",
+  // Mustafa Ergaibi (Sprint 3): priorities (US-27). One line per ranking: IDs, a count, and reason codes only.
+  priority_calculation_failed: "error",
 
 };
 

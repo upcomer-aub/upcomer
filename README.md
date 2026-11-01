@@ -43,6 +43,7 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/courses/:courseId/exams` | Exams for that course |
 | `/courses/:courseId/materials` | Materials for that course |
 | `/courses/:courseId/exam` | The Upcomer Exam: every distinct question once, most likely first. Logged-in students can report a question under it, mark questions done and continue where they stopped (US-21), and switch to their personal order (US-28); optional `reported`, `report_error`, `progress_error`, `at`, and `order=personal` query parameters |
+| `/courses/:courseId/confidence` | Rate your confidence in each of the course's topics, 1 to 5 or Skip (US-24); requires a session. Optional `saved` and `error` query parameters |
 | `/courses/:courseId/questions` | The course's question bank, most frequent first; optional `q`, `year`, `termId`, `examType`, and `professorId` query parameters |
 | `/files/:fileId` | Original bytes for a stored file record |
 | `/admin/uploads` | Admin upload menu |
@@ -291,16 +292,26 @@ After pulling, run `npx prisma generate` and `npm run db:migrate`. Two migration
 
 ### Placeholders for other stories
 
-Both are in `lib/personal-order.ts`, marked `PLACEHOLDER`:
-- **`personalPriority(paperCount, totalPapers, weakness)`**, for US-27: `share of papers × (0.5 + weakness)`. Replace this one function.
-- **`NEUTRAL_WEAKNESS = 0.5`**, for US-24's neutral default: the weakness of a question with no topic, or a topic without a score.
+- None left. `NEUTRAL_WEAKNESS = 0.5` now lives in `lib/learning-profile.ts` as US-24's neutral default: the weakness of a skipped topic, a topic never rated, and a question with no topic. `lib/personal-order.ts` re-exports it.
+
+### Topic confidence (US-24)
+
+- **`/courses/:courseId/confidence`** (logged-in students; a visitor is sent to log in and comes back) lists the course's topics: the distinct `CourseFile.topic` values of its published exam papers, keyed with `topicKey`, so they match the personal order. Each topic is rated **1 Not confident … 5 Very confident** or **Skip**, in one plain POST form pre-filled with the student's saved ratings. A course with no topics shows a message instead of a form. The Upcomer Exam links to it ("Rate your topics") under the order switch, and from the "no learning profile" note.
+- **Saving** (`saveTopicConfidence` in `lib/topic-confidence.ts`) turns a rating into `weakness = (5 − rating) / 4` (1 → 1, 3 → 0.5, 5 → 0) and writes it with `setTopicWeakness`, together with the rating in `LearningTopic.confidence` (migration `20261101000000_topic_confidence`). All topics are saved in one transaction with room for a slow database (`maxWait` 10 s, `timeout` 20 s); if any write fails, nothing is kept.
+- **Skip** writes `NEUTRAL_WEAKNESS` with no rating, when the topic has no row yet or the student had rated it before. A row written by other code without a rating (for example US-25) is left alone, so its weakness is kept.
+- **Refused, saving nothing:** a topic that isn't one of this course's (including another course's), a rating that isn't 1–5 or Skip, a topic sent twice, or an empty form. Only the session student's rows for this course are ever written. Saves per student per minute are limited by `TOPIC_CONFIDENCE_RATE_LIMIT_PER_MINUTE` (default 30).
+
+### Priorities (US-27)
+
+- **`personalPriority(paperCount, totalPapers, weakness)`** in `lib/personal-order.ts`: `share of papers × (1 + WEAKNESS_WEIGHT × weakness)`, with `WEAKNESS_WEIGHT = 2`. A student's strongest topic still counts at its full exam share, and the weakest counts at most 3 times as much. Equally weak questions rank by frequency, and equally frequent ones by weakness. The function is pure, so the same inputs always give the same priority.
+- **Invalid inputs** (NaN, Infinity, negative counts, more papers than the course has, weakness outside 0–1) never throw. `checkedPriority` clamps each one to a safe value and returns the reason codes. `personalizeQuestions` logs at most one `priority_calculation_failed` line per ranking, so a bad course can't flood the error alert.
 
 ### Known limitations
 
-- **Nothing writes `weakness` yet.** Until US-24 or US-25 exists, every real student's profile is empty, so the personal order shows the frequency order with the "no learning profile" note. The tests write profiles with `setTopicWeakness`, and US-33's "practice" is simulated the same way.
+- **Only self-ratings write `weakness` so far.** Students set it at `/courses/:courseId/confidence` (US-24); performance (US-25) doesn't exist yet. Until a student rates a course's topics, the personal order shows the frequency order with the "no learning profile" note.
 - **A report sent from the personal order returns to the frequency order**, because the report action (US-23) does not keep `order=personal`. Questions keep their numbers, so its notice and `#question-N` still point at the right question.
 
-Monitoring: see the events table (`question_progress_*`, `learning_profile_*`). Topics are never logged.
+Monitoring: see the events table (`question_progress_*`, `learning_profile_*`, `priority_calculation_failed`, `topic_confidence_*`). Topics are never logged.
 
 Tests: `tests/unit/learning-profile.test.ts`, `tests/unit/question-progress.test.ts`, `tests/unit/personal-order.test.ts`, `tests/unit/study-progress-pages.test.tsx`, `tests/unit/personal-order-pages.test.tsx`, `tests/integration/learning-profile.test.ts`, `tests/integration/question-progress.test.ts`, `tests/integration/personal-order.test.ts`, `tests/e2e/study-progress.spec.ts`, and `tests/e2e/personal-order.spec.ts`. They create their own courses and students and delete them. Shared files changed: `prisma/schema.prisma`, `lib/logger.ts`, `components/consolidated-exam.tsx`, `app/courses/[courseId]/exam/page.tsx`, `tests/unit/question-report-pages.test.tsx` (one mock line), `README.md`, and `.env.example`; the exact lines are in `MEMBER_3_SPRINT_3_IMPLEMENTATION_REPORT.md`.
 
@@ -592,7 +603,11 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | 3 (Sprint 3) | `question_progress_saved` | info | `userId`, `courseId`, `groupId`, `operation` (`mark` or `undo`) |
 | 3 (Sprint 3) | `question_progress_refused`, `question_progress_rate_limited` | warn | `groupId`, `reason` (`invalid_choice`, `not_found`), `userId`, `retryAfterSeconds` |
 | 3 (Sprint 3) | `question_progress_failed`, `question_progress_retrieval_failed` | error | `userId`, `courseId`, `groupId`, `operation` (`mark` or `relink`), `errorType` |
-| 3 (Sprint 3) | `learning_profile_retrieval_failed`, `learning_profile_update_failed` | error | `userId`, `courseId`, `source` (`personal_order`), `errorType` (never a topic) |
+| 3 (Sprint 3) | `learning_profile_retrieval_failed`, `learning_profile_update_failed` | error | `userId`, `courseId`, `source` (`personal_order`, `topic_confidence`), `errorType` (never a topic) |
+| Mustafa Ergaibi (Sprint 3) | `priority_calculation_failed` | error | `userId`, `courseId`, `affectedQuestions`, `reasons` (`invalid_paper_count`, `invalid_total_papers`, `paper_count_exceeds_total`, `invalid_weakness`); at most one line per ranking |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_saved` | info | `userId`, `courseId`, `ratedTopics`, `skippedTopics`, `unchangedTopics` (never a topic) |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_refused`, `topic_confidence_rate_limited` | warn | `userId`, `courseId`, `reason` (`unknown_topic`, `invalid_rating`, `no_ratings`), `retryAfterSeconds` |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_save_failed` | error | `userId`, `courseId`, `errorType` |
 
 ### What is never logged
 

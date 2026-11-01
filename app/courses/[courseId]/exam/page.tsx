@@ -37,6 +37,9 @@ export default async function ConsolidatedExamPage({ params, searchParams }: {
   const shown = personalOrder?.hasProfile ? personalOrder.questions : exam.questions;
   const papers = `${exam.totalPapers} previous ${exam.totalPapers === 1 ? "exam" : "exams"}`;
   const route = `/courses/${courseId}/exam`;
+  // Topic ratings set the personal order (US-24); the link sits in the note when there is no profile, else under the switch.
+  const rateTopics = <Link href={`/courses/${courseId}/confidence`}>Rate your topics</Link>;
+  const noProfile = Boolean(personalOrder && !personalOrder.hasProfile);
   return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Upcomer Exam</h1>
     <ReportNotice reported={reported} error={reportError} />
     {progressError && <p className="notice error" role="alert">{progressMessage(progressError)}</p>}
@@ -47,7 +50,8 @@ export default async function ConsolidatedExamPage({ params, searchParams }: {
         : <>
           <p className="muted">{exam.questions.length} distinct {exam.questions.length === 1 ? "question" : "questions"} from {papers}, {personalOrder?.hasProfile ? "in your personal order" : "the most likely first"}. Each question is listed once.</p>
           {done && <OrderSwitch route={route} personal={personal} />}
-          {personalOrder && !personalOrder.hasProfile && <p className="muted" role="note">You have no learning profile for this course yet, so this is the frequency order.</p>}
+          {done && !noProfile && <p className="muted">{rateTopics} to change your personal order.</p>}
+          {noProfile && <p className="muted" role="note">You have no learning profile for this course yet, so this is the frequency order. {rateTopics} to get a personal order.</p>}
           {exam.lowConfidence && <p className="notice" role="note">Low confidence: these tiers are based on only {papers}. They become more reliable from {MIN_CONFIDENT_PAPERS} papers.</p>}
           {done && <ProgressSummary positions={shown} done={done} at={Number(at) || undefined} />}
           {!user && <p className="muted">Logged-in students can mark questions done, continue where they stopped, and see a personal order.</p>}

@@ -1,0 +1,2 @@
+.form { max-width: 32rem; }
+.form .topic + .topic { margin-top: .5rem; }

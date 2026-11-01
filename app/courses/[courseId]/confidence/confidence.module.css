@@ -1,3 +1,2 @@
 .form { max-width: 32rem; }
-.form .topic { border-top: 1px solid var(--border); padding-top: 1rem; }
-.form .topic:first-of-type { border-top: 0; padding-top: 0; }
+.form .topic + .topic { margin-top: .5rem; }

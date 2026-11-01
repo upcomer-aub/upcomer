@@ -291,9 +291,12 @@ After pulling, run `npx prisma generate` and `npm run db:migrate`. Two migration
 
 ### Placeholders for other stories
 
-Both are in `lib/personal-order.ts`, marked `PLACEHOLDER`:
-- **`personalPriority(paperCount, totalPapers, weakness)`**, for US-27: `share of papers × (0.5 + weakness)`. Replace this one function.
-- **`NEUTRAL_WEAKNESS = 0.5`**, for US-24's neutral default: the weakness of a question with no topic, or a topic without a score.
+- **`NEUTRAL_WEAKNESS = 0.5`** in `lib/personal-order.ts`, marked `PLACEHOLDER`, for US-24's neutral default: the weakness of a question with no topic, or a topic without a score.
+
+### Priorities (US-27)
+
+- **`personalPriority(paperCount, totalPapers, weakness)`** in `lib/personal-order.ts`: `share of papers × (1 + WEAKNESS_WEIGHT × weakness)`, with `WEAKNESS_WEIGHT = 2`. A student's strongest topic still counts at its full exam share, and the weakest counts at most 3 times as much. Equally weak questions rank by frequency, and equally frequent ones by weakness. The function is pure, so the same inputs always give the same priority.
+- **Invalid inputs** (NaN, Infinity, negative counts, more papers than the course has, weakness outside 0–1) never throw. `checkedPriority` clamps each one to a safe value and returns the reason codes. `personalizeQuestions` logs at most one `priority_calculation_failed` line per ranking, so a bad course can't flood the error alert.
 
 ### Known limitations
 
@@ -593,6 +596,7 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | 3 (Sprint 3) | `question_progress_refused`, `question_progress_rate_limited` | warn | `groupId`, `reason` (`invalid_choice`, `not_found`), `userId`, `retryAfterSeconds` |
 | 3 (Sprint 3) | `question_progress_failed`, `question_progress_retrieval_failed` | error | `userId`, `courseId`, `groupId`, `operation` (`mark` or `relink`), `errorType` |
 | 3 (Sprint 3) | `learning_profile_retrieval_failed`, `learning_profile_update_failed` | error | `userId`, `courseId`, `source` (`personal_order`), `errorType` (never a topic) |
+| Mustafa Ergaibi (Sprint 3) | `priority_calculation_failed` | error | `userId`, `courseId`, `affectedQuestions`, `reasons` (`invalid_paper_count`, `invalid_total_papers`, `paper_count_exceeds_total`, `invalid_weakness`); at most one line per ranking |
 
 ### What is never logged
 

@@ -78,7 +78,11 @@ type LogEvent =
   | "question_progress_saved"
   | "question_progress_refused"
   | "question_progress_rate_limited"
-  | "priority_calculation_failed";
+  | "priority_calculation_failed"
+  | "topic_confidence_saved"
+  | "topic_confidence_refused"
+  | "topic_confidence_rate_limited"
+  | "topic_confidence_save_failed";
 
 
 export type { LogEvent };
@@ -186,6 +190,11 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   question_progress_rate_limited: "warn",
   // Mustafa Ergaibi (Sprint 3): priorities (US-27). One line per ranking: IDs, a count, and reason codes only.
   priority_calculation_failed: "error",
+  // Mustafa Ergaibi (Sprint 3): topic confidence (US-24). IDs, counts, reasons, and error types only; topics are never logged.
+  topic_confidence_saved: "info",
+  topic_confidence_refused: "warn",
+  topic_confidence_rate_limited: "warn",
+  topic_confidence_save_failed: "error",
 
 };
 

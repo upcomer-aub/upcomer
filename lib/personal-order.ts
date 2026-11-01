@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import type { ExamQuestion } from "@/lib/consolidated-exam";
-import { getLearningProfile, isWeakness, questionTopic, type LearningProfile } from "@/lib/learning-profile";
+import { getLearningProfile, isWeakness, NEUTRAL_WEAKNESS, questionTopic, type LearningProfile } from "@/lib/learning-profile";
 import { logError } from "@/lib/logger";
 
 // The personal order of the Upcomer Exam (US-28): the same questions, reordered by the student's priorities, so their
@@ -9,9 +9,8 @@ import { logError } from "@/lib/logger";
 // reports, and links to a question mean the same question in both orders. A student without a learning profile in the
 // course (US-33) gets the frequency order unchanged.
 
-// PLACEHOLDER for US-24 (Mustafa Ergaibi): the weakness used for a topic the student has no score for, standing in for
-// US-24's neutral default for a student who skips rating. Replace or remove it with US-24.
-export const NEUTRAL_WEAKNESS = 0.5;
+// The weakness of a topic the student has no score for: US-24's neutral default, the same as for a skipped topic.
+export { NEUTRAL_WEAKNESS };
 
 // US-27: how much more the weakest topic counts than the strongest. The weakness factor runs from 1 (weakness 0, the
 // strongest topic) to 1 + WEAKNESS_WEIGHT (weakness 1, the weakest): a strong topic still counts at its full exam share,

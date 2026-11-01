@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { logError } from "@/lib/logger";
 
@@ -40,6 +41,10 @@ export function questionTopic(papers: Array<{ topic: string | null }>): { topicK
 
 export const isWeakness = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 
+// The neutral default (US-24): the weakness of a topic the student skipped when rating their confidence, and of a topic
+// they never rated (or a question without a topic) in the personal order. One value, so both behave the same.
+export const NEUTRAL_WEAKNESS = 0.5;
+
 // The student's profile in one course. Only that course's rows are read.
 export async function getLearningProfile(userId: string, courseId: string): Promise<LearningProfile> {
   try {
@@ -55,15 +60,21 @@ export type WeaknessResult = { ok: true } | { ok: false; error: "topic_required"
 
 // Saves a student's weakness in one topic of one course, from 0 (strong) to 1 (weak). The one way the profile is written:
 // for US-24 (self-rating) and US-25 (performance) to call once they exist. Only that course's row for that topic changes.
-export async function setTopicWeakness(userId: string, courseId: string, topic: string, weakness: number): Promise<WeaknessResult> {
+// US-24 also passes the rating it came from (`confidence`, null when skipped) and its transaction (`client`); without a
+// `confidence` the stored rating is left as it is.
+export async function setTopicWeakness(
+  userId: string, courseId: string, topic: string, weakness: number,
+  options: { confidence?: number | null; client?: Pick<Prisma.TransactionClient, "learningTopic"> } = {},
+): Promise<WeaknessResult> {
   const key = topicKey(topic);
   if (!key) return { ok: false, error: "topic_required" };
   if (!isWeakness(weakness)) return { ok: false, error: "invalid_weakness" };
+  const rating = options.confidence === undefined ? {} : { confidence: options.confidence };
   try {
-    await db.learningTopic.upsert({
+    await (options.client ?? db).learningTopic.upsert({
       where: { userId_courseId_topicKey: { userId, courseId, topicKey: key } },
-      create: { userId, courseId, topicKey: key, topic: tidyTopic(topic), weakness },
-      update: { weakness },
+      create: { userId, courseId, topicKey: key, topic: tidyTopic(topic), weakness, ...rating },
+      update: { weakness, ...rating },
     });
     return { ok: true };
   } catch (error) {

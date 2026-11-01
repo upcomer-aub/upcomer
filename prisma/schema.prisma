@@ -375,6 +375,9 @@ model LearningTopic {
   // How weak the student is in the topic, from 0 (strong) to 1 (weak). Written with setTopicWeakness; how it is worked out
   // (self-rating, US-24; performance, US-25) belongs to those stories.
   weakness  Float
+  // The student's own confidence rating, 1 (not confident) to 5 (very confident), from US-24. Null when the topic was
+  // skipped, or when the row was written by other code (for example US-25) without a rating.
+  confidence Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -16,7 +16,7 @@ import {
 
 // npm run availability: availability and reliability of every API as the number of concurrent users grows.
 // It builds and starts the production app, then runs a realistic mix of student requests (catalog search, course pages,
-// exam lists, question bank, ordered exam, student advice, editing one's own advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
+// exam lists, question bank, ordered exam, student advice, editing one's own advice, reporting advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
 // 50, and 100 users at once. Every request is recorded per API as available or not (timeout, connection error, 5xx, or an
 // unexpected status), correct or not, and how long it took. The report compares availability, error rates, latency
 // percentiles, throughput, timeouts, and error types across the user counts, with machine CPU, server memory, database
@@ -51,8 +51,8 @@ type User = { id: string; email: string; name: string; client: Client };
 // advice: the stamp in every advice body the run creates, the name of the author of its anonymous advice, and each user's
 // own (anonymous) advice in the first course, which they open and edit (US-36).
 type World = {
-  courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string; editAdvice: string };
-  advice: { stamp: string; hiddenAuthor: string; own: Map<string, string> };
+  courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string; editAdvice: string; reportAdvice: string };
+  advice: { stamp: string; hiddenAuthor: string; own: Map<string, string>; reportable: string };
 };
 let adviceEdits = 0;
 type Api = { name: string; weight: number; run(user: User, world: World, rng: Rng): Promise<{ reply: Reply; expected: number[]; correct: boolean }> };
@@ -109,6 +109,16 @@ const APIS: Api[] = [
       courseId: course.id, adviceId, body: `${world.advice.stamp} own ${user.id} version ${++adviceEdits}`, resourceUrl: "", page: "1",
     }, TIMEOUT_MS);
     return { reply, expected: [303], correct: reply.location === `/courses/${course.id}/advice?edited=1` };
+  } },
+  // US-43: each user reports the same advice (by no user). Their first report is sent and later ones are refused as
+  // duplicates; both are correct, anything else (a refusal of another kind, or no redirect) is not.
+  { name: "POST /courses/:courseId/advice (report advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    const reply = await user.client.postAction(`/courses/${course.id}/advice`, world.actions.reportAdvice, {
+      courseId: course.id, adviceId: world.advice.reportable, reason: "SPAM", note: "", page: "1",
+    }, TIMEOUT_MS);
+    const feed = `/courses/${course.id}/advice?`;
+    return { reply, expected: [303], correct: reply.location === `${feed}reported=1` || reply.location === `${feed}report_error=duplicate` };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
@@ -260,7 +270,7 @@ function startServer(logFile: string) {
   const command = `${process.env.AVAILABILITY_SKIP_BUILD === "1" ? "" : "npm run build && "}npx next start --port ${PORT}`;
   // Logs are not saved to the database during the run, so the run itself does not change what it measures. Each user edits
   // their advice more often than a person would, so the per-student change limit (DoS protection, US-36) is raised.
-  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
+  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_REPORT_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);
   return server;
@@ -373,8 +383,10 @@ async function main() {
     const users = await createUsers(db, stamp, Math.max(...STAGES));
     // Advice in every course (US-38): one without an author account, one anonymous by the first user (whose name must never
     // show), and one removed. Only the anonymous advice is by the first user, so their name on the page is always a leak.
-    await db.advice.createMany({ data: courses.flatMap(course => [
-      { courseId: course.id, authorId: null, body: `${stamp} visible ${course.id}` },
+    const reportable = `${stamp.toLowerCase()}-reportable`;
+    await db.advice.createMany({ data: courses.flatMap((course, index) => [
+      // The first course's is the one every user reports (US-43).
+      { ...(index === 0 && { id: reportable }), courseId: course.id, authorId: null, body: `${stamp} visible ${course.id}` },
       { courseId: course.id, authorId: users[0].id, anonymous: true, body: `${stamp} anonymous ${course.id}` },
       { courseId: course.id, authorId: users[0].id, body: `${stamp} removed ${course.id}`, status: "REMOVED" as const, removedAt: new Date() },
     ]) });
@@ -387,9 +399,11 @@ async function main() {
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
     const editPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${own.get(users[0].id)}/edit`);
+    const feedPage = await users[0].client.get(`/courses/${courses[0].id}/advice`);
     const world: World = {
-      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes") },
-      advice: { stamp, hiddenAuthor: users[0].name, own },
+      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes"),
+        reportAdvice: actionIdFor(feedPage.body, "Send report") },
+      advice: { stamp, hiddenAuthor: users[0].name, own, reportable },
     };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,
     // so every API is called twice before measuring.

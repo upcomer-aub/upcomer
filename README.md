@@ -44,7 +44,7 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/courses/:courseId/materials` | Materials for that course |
 | `/courses/:courseId/exam` | The Upcomer Exam: every distinct question once, most likely first. Logged-in students can report a question under it, mark questions done and continue where they stopped (US-21), and switch to their personal order (US-28); optional `reported`, `report_error`, `progress_error`, `at`, and `order=personal` query parameters |
 | `/courses/:courseId/confidence` | Rate your confidence in each of the course's topics, 1 to 5 or Skip (US-24); requires a session. Optional `saved` and `error` query parameters |
-| `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter. The viewer's own advice is marked "Your advice" with an "Edit or delete" link (US-36) |
+| `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter. The viewer's own advice is marked "Your advice" with an "Edit or delete" link (US-36); other students' advice has a "Report this advice" form (US-43), at most 10 reports per student per minute |
 | `/courses/:courseId/advice/:adviceId/edit` | The author edits or deletes their own advice (US-36), at most 20 changes per student per minute; anyone else's advice is a 404. Requires a session |
 | `/courses/:courseId/questions` | The course's question bank, most frequent first; optional `q`, `year`, `termId`, `examType`, and `professorId` query parameters |
 | `/files/:fileId` | Original bytes for a stored file record |
@@ -423,6 +423,18 @@ In the feed, the viewer's own advice says "Your advice" (with "Others see you as
 
 The actions are `lib/advice-actions.ts` and the page is `app/courses/[courseId]/advice/[adviceId]/edit/page.tsx`. Tests: `tests/unit/advice-changes.test.ts`, `tests/unit/advice-actions.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-changes.test.ts`, and `tests/e2e/advice-changes.spec.ts`; the load test is `npm run load -- advice-edit`. Details and results: `ADVICE_CHANGES_REPORT.md`.
 
+### Reporting advice (US-43)
+
+Under each other student's advice, the feed has a closed "Report this advice" form: a reason (insulting, spam or off-topic, personal information, encouraging cheating, or something else) and optional details for the admin (at most 500 characters). The report is stored in `AdviceReport`, linked to the advice and its course, and waits for an admin (US-77). The advice stays up until then.
+
+- **Duplicates.** A student has at most one open report per advice. The feed shows "You reported this advice" instead of the form, and a second report (for example from a page opened earlier) is refused with "You already reported this advice". Reports are taken one at a time per student and advice (a transaction lock), so two clicks at the same moment open one report. After an admin closes the report, the student can report the advice again.
+- **What can be reported.** Only advice still shown; never one's own advice (the author edits or deletes it instead, US-36). The course comes from the stored advice, never from the form.
+- **Privacy.** Only admins see reports. Nothing on a student-facing page says who reported an advice, and reporting anonymous advice reveals nothing about its author. The report is kept when its advice is deleted by its author, so the admin can still decide on it.
+- **DoS protection.** At most `ADVICE_REPORT_RATE_LIMIT_PER_MINUTE` reports (default 10) per student per minute; past it the report is refused with "Too many reports in a minute" before the database is read, and `advice_report_rate_limited` is logged.
+- **Logs.** `advice_report_submitted` (info, with the reason category), `advice_report_refused` (warn, with the refusal reason), and `advice_report_failed` (error), with IDs only, never the note or the advice text. Reports are timed as `advice_report`, and the feed's check for the viewer's own reports as `advice_reported_read`.
+
+The service is `lib/advice-reports.ts` (rules in `lib/advice-report-rules.ts`, action in `lib/advice-report-actions.ts`) and the form is `components/report-advice.tsx`. Tests: `tests/unit/advice-reports.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-reports.test.ts`, and `tests/e2e/advice-reports.spec.ts`; `npm run availability` sends reports too. Details and results: `ADVICE_REPORTS_REPORT.md`.
+
 ## Exam pipeline integration tests (US-92)
 
 `tests/integration/exam-pipeline.test.ts` runs the exam pipeline end to end against a real database: five sample exam PDFs (built in `tests/integration/fixtures/sample-exams.ts`) are uploaded through `POST /api/admin/uploads`, their questions extracted, grouped and ranked by `rebuildQuestionBank`, and the result checked against the expected consolidated ordered exam (`getConsolidatedExam`), question by question, with counts, tiers, and papers. Other tests cover upload order, concurrent uploads, pending and rejected submissions, materials, deleted and re-tagged papers, non-admin uploads, and a 20-paper course within 1 s per stage. They run in CI with `npm run test:integration`.
@@ -649,6 +661,10 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mohammed Al-Haiqi (Sprint 4) | `advice_change_refused` | warn | `adviceId`, `operation`, `reason`, `userId` |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_change_rate_limited` | warn | `userId`, `operation`, `retryAfterSeconds` |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_change_failed` | error | `adviceId`, `operation`, `userId`, `errorType` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_report_submitted` | info | `reportId`, `adviceId`, `courseId`, `category`, `userId` (never the note) |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_report_refused` | warn | `adviceId`, `reason`, `userId` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_report_rate_limited` | warn | `userId`, `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_report_failed` | error | `adviceId`, `userId`, `errorType` |
 
 ### What is never logged
 

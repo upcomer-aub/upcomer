@@ -6,6 +6,7 @@ import type { FeedItem } from "@/lib/advice";
 
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(), getCourseById: vi.fn(), getCourseAdvice: vi.fn(), allowAdviceFeedRead: vi.fn(), getOwnAdvice: vi.fn(),
+  getOpenReportedAdviceIds: vi.fn(),
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
 }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: vi.fn() }));
@@ -15,6 +16,8 @@ vi.mock("@/lib/advice", () => ({ getCourseAdvice: mocks.getCourseAdvice, allowAd
 vi.mock("@/lib/my-courses-actions", () => ({ addCourseAction: vi.fn() }));
 vi.mock("@/lib/advice-changes", () => ({ getOwnAdvice: mocks.getOwnAdvice }));
 vi.mock("@/lib/advice-actions", () => ({ editAdviceAction: vi.fn(), deleteAdviceAction: vi.fn() }));
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: mocks.getOpenReportedAdviceIds }));
+vi.mock("@/lib/advice-report-actions", () => ({ reportAdviceAction: vi.fn() }));
 import EditAdvicePage from "@/app/courses/[courseId]/advice/[adviceId]/edit/page";
 import CourseAdvicePage from "@/app/courses/[courseId]/advice/page";
 import CoursePage from "@/app/courses/[courseId]/page";
@@ -34,6 +37,7 @@ beforeEach(() => {
   mocks.getCourseById.mockReset().mockResolvedValue(course);
   mocks.getCourseAdvice.mockReset().mockResolvedValue(feed([item()]));
   mocks.allowAdviceFeedRead.mockReset().mockReturnValue(true);
+  mocks.getOpenReportedAdviceIds.mockReset().mockResolvedValue(new Set());
 });
 
 describe("the course advice page (US-38)", () => {
@@ -87,7 +91,7 @@ describe("the course advice page (US-38)", () => {
   it("shows advice text as text, never as HTML", async () => {
     mocks.getCourseAdvice.mockResolvedValue(feed([item({ body: "<script>alert(1)</script> Study <b>hard</b>" })]));
     const html = await page();
-    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<script>alert(1)");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; Study &lt;b&gt;hard&lt;/b&gt;");
   });
   it("says so when the course has no advice", async () => {
@@ -143,7 +147,39 @@ describe("the viewer's own advice in the feed (US-36)", () => {
     expect(await page({ change_error: "not_found" })).toContain("That advice isn&#x27;t yours to change, or it is no longer shown.");
     const typed = await page({ change_error: "<script>x</script>" });
     expect(typed).toContain("Your change could not be saved. Please try again.");
-    expect(typed).not.toContain("script");
+    expect(typed).not.toContain("<script>x");
+  });
+});
+
+describe("reporting advice from the feed (US-43)", () => {
+  it("offers a report form with every reason on other students' advice only, keeping the feed page", async () => {
+    mocks.getCourseAdvice.mockResolvedValue(feed([item({ id: "mine-1", mine: true }), item({ id: "theirs-1" })], { total: 45, page: 2, totalPages: 3 }));
+    const html = await page({ page: "2" });
+    expect(html.match(/Report this advice/g)).toHaveLength(1);
+    expect(html).toContain('name="adviceId" value="theirs-1"');
+    expect(html).not.toContain('name="adviceId" value="mine-1"');
+    expect(html).toContain('name="page" value="2"');
+    for (const value of ["OFFENSIVE", "SPAM", "PERSONAL_INFO", "ACADEMIC_DISHONESTY", "OTHER"]) expect(html).toContain(`value="${value}"`);
+    expect(html).toContain('maxLength="500"');
+    expect(html).toContain("Only admins see your report. The author is not told who reported it.");
+    // Only the other student's advice is checked for an earlier report.
+    expect(mocks.getOpenReportedAdviceIds).toHaveBeenCalledWith("student-1", ["theirs-1"]);
+  });
+  it("says the viewer already reported an advice instead of offering the form again", async () => {
+    mocks.getCourseAdvice.mockResolvedValue(feed([item({ id: "theirs-1" }), item({ id: "theirs-2" })]));
+    mocks.getOpenReportedAdviceIds.mockResolvedValue(new Set(["theirs-1"]));
+    const html = await page();
+    expect(html.match(/You reported this advice. An admin will check it./g)).toHaveLength(1);
+    expect(html.match(/Report this advice/g)).toHaveLength(1);
+    expect(html).toContain('name="adviceId" value="theirs-2"');
+  });
+  it("shows the outcome of a report, and a refusal by its message only", async () => {
+    expect(await page({ reported: "1" })).toContain("Thanks, your report was sent. An admin will check the advice.");
+    expect(await page({ report_error: "duplicate" })).toContain("You already reported this advice. An admin will check it.");
+    expect(await page({ report_error: "own_advice" })).toContain("This is your own advice.");
+    const typed = await page({ report_error: "<script>x</script>" });
+    expect(typed).toContain("Your report could not be sent. Please try again.");
+    expect(typed).not.toContain("<script>x");
   });
 });
 

@@ -1,4 +1,5 @@
 import type { AdviceScope } from "@prisma/client";
+import { hasReadableText } from "@/lib/readable-text";
 
 // Display rules for advice from previous students (E3), shared by the service, the feed (US-38), and later the edit,
 // report, and search pages. Pure functions only, so they are unit tested without a database.
@@ -93,3 +94,39 @@ export function clampPage(requested: unknown, total: number, pageSize = ADVICE_P
 
 // "12 Nov 2026", in UTC so the server and the tests agree.
 export const adviceDate = (value: Date) => value.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+// Editing and deleting one's own advice (US-36). The limits are the proposed ones for publishing too (US-34), so an
+// advice can always be edited back to what it was published with.
+export const MAX_ADVICE_LENGTH = 2000;
+export const MAX_RESOURCE_URL_LENGTH = 500;
+
+export type AdviceChangeRefusal = "empty" | "too_long" | "invalid_resource" | "not_found" | "rate_limited" | "unexpected";
+
+const CHANGE_MESSAGES: Record<AdviceChangeRefusal, string> = {
+  empty: "Write your advice before saving.",
+  too_long: `Keep your advice to ${MAX_ADVICE_LENGTH} characters or fewer.`,
+  invalid_resource: "A resource link must be a full https:// address, or left empty.",
+  not_found: "That advice isn't yours to change, or it is no longer shown.",
+  rate_limited: "Too many changes in a minute. Wait a moment and try again.",
+  unexpected: "Your change could not be saved. Please try again.",
+};
+
+// Any other value (for example one typed into the URL) gets the general message, never the value itself.
+export const adviceChangeMessage = (error: string) =>
+  Object.hasOwn(CHANGE_MESSAGES, error) ? CHANGE_MESSAGES[error as AdviceChangeRefusal] : CHANGE_MESSAGES.unexpected;
+
+export type AdviceDraft = { body: string; resourceUrl: string | null };
+
+// Checks an edit before it is saved. Line breaks inside the text are kept; spaces around it are not. Text made only of
+// spaces or invisible characters counts as empty. An empty resource removes the link; any other value must be a safe
+// https URL, and is stored normalized.
+export function checkAdviceDraft(input: { body: string; resourceUrl?: string }): { ok: true; draft: AdviceDraft } | { ok: false; error: AdviceChangeRefusal } {
+  const body = input.body.replace(/\r\n?/g, "\n").trim();
+  if (!hasReadableText(body)) return { ok: false, error: "empty" };
+  if (body.length > MAX_ADVICE_LENGTH) return { ok: false, error: "too_long" };
+  const raw = (input.resourceUrl ?? "").trim();
+  if (!raw) return { ok: true, draft: { body, resourceUrl: null } };
+  const resourceUrl = raw.length <= MAX_RESOURCE_URL_LENGTH ? safeResourceUrl(raw) : null;
+  if (!resourceUrl || resourceUrl.length > MAX_RESOURCE_URL_LENGTH) return { ok: false, error: "invalid_resource" };
+  return { ok: true, draft: { body, resourceUrl } };
+}

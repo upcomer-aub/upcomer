@@ -5,8 +5,8 @@ import { logError } from "@/lib/logger";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
 import { timed } from "@/lib/timing";
 
-// Advice from previous students (E3). This file reads advice for students: the course feed (US-38). Nothing here checks
-// the caller: the pages call requireUser() first. The advice text and author names are never logged.
+// Advice from previous students (E3). This file reads advice for students: the course feed (US-38); changes by the author
+// (US-36) are in lib/advice-changes.ts. Nothing here checks the caller: the pages call requireUser() first. The advice text and author names are never logged.
 
 const errorType = (error: unknown) => (error instanceof Error ? error.name : "Unknown");
 
@@ -23,7 +23,7 @@ export const visibleCourseAdvice = (courseId: string) => ({
 }) satisfies Prisma.AdviceWhereInput;
 
 const adviceSelect = {
-  id: true, body: true, anonymous: true, scope: true, topic: true, resourceUrl: true, editedAt: true, createdAt: true,
+  id: true, authorId: true, body: true, anonymous: true, scope: true, topic: true, resourceUrl: true, editedAt: true, createdAt: true,
   author: { select: { name: true } },
   file: { select: { id: true, title: true, category: true, status: true } },
   term: { select: { name: true } },
@@ -59,7 +59,13 @@ export function toAdviceItem(row: AdviceRow): AdviceItem {
   };
 }
 
-export type AdviceFeed = { items: AdviceItem[]; total: number; page: number; totalPages: number };
+// In the feed, each advice also says whether the viewer wrote it (US-36), so only the author is offered to edit or delete
+// it. That is about the viewer alone: an anonymous author sees "Your advice", everyone else still sees no name.
+export type FeedItem = AdviceItem & { mine: boolean };
+export type AdviceFeed = { items: FeedItem[]; total: number; page: number; totalPages: number };
+// What is read and cached: the same for every viewer. The author IDs stay on the server, beside the items, and are only
+// compared with the viewer's ID; they never reach a page.
+type SharedFeed = { items: AdviceItem[]; authorIds: Array<string | null>; total: number; page: number; totalPages: number };
 
 // Caching. A feed page is the same for every viewer (it holds no viewer's data), so one read serves every student who
 // opens it within ADVICE_FEED_CACHE_SECONDS (default 30; 0 turns the cache off). Every code path that writes advice
@@ -70,7 +76,7 @@ const MAX_CACHED_COURSES = 500;
 const MAX_CACHED_PAGES = 50;
 // Page numbers past this are cached as this page; it is past the end of any real course, so it shows the last page.
 const MAX_PAGE_KEY = 10_000;
-type CachedFeed = { feed: AdviceFeed; expiresAt: number };
+type CachedFeed = { feed: SharedFeed; expiresAt: number };
 const feedCache = new Map<string, Map<number, CachedFeed>>();
 
 export function adviceCacheSeconds() {
@@ -101,7 +107,7 @@ function cachedFeed(courseId: string, key: number, now: number) {
   return null;
 }
 
-function storeFeed(courseId: string, key: number, feed: AdviceFeed, now: number) {
+function storeFeed(courseId: string, key: number, feed: SharedFeed, now: number) {
   const seconds = adviceCacheSeconds();
   if (!seconds) return;
   let pages = feedCache.get(courseId);
@@ -129,7 +135,7 @@ export function allowAdviceFeedRead(userId: string) {
   return false;
 }
 
-async function readFeed(courseId: string, requestedPage: number): Promise<AdviceFeed> {
+async function readFeed(courseId: string, requestedPage: number): Promise<SharedFeed> {
   const where = visibleCourseAdvice(courseId);
   const total = await db.advice.count({ where });
   const { page, totalPages } = clampPage(requestedPage, total);
@@ -138,20 +144,25 @@ async function readFeed(courseId: string, requestedPage: number): Promise<Advice
       where, select: adviceSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * ADVICE_PAGE_SIZE, take: ADVICE_PAGE_SIZE,
     })
     : [];
-  return { items: rows.map(toAdviceItem), total, page, totalPages };
+  return { items: rows.map(toAdviceItem), authorIds: rows.map(row => row.authorId), total, page, totalPages };
+}
+
+function forViewer({ items, authorIds, total, page, totalPages }: SharedFeed, viewerId: string | undefined): AdviceFeed {
+  return { items: items.map((item, index) => ({ ...item, mine: viewerId !== undefined && authorIds[index] === viewerId })), total, page, totalPages };
 }
 
 // The course feed (US-38): the course's visible advice, newest first, 20 a page. An invalid or out-of-range page falls
-// back to the first or last page. A cached page is timed as "advice_feed_cached", a database read as "advice_feed".
-export async function getCourseAdvice(courseId: string, requestedPage: unknown = 1): Promise<AdviceFeed> {
+// back to the first or last page. With the viewer's ID, their own advice is marked as theirs. A cached page is timed as
+// "advice_feed_cached", a database read as "advice_feed".
+export async function getCourseAdvice(courseId: string, requestedPage: unknown = 1, viewerId?: string): Promise<AdviceFeed> {
   const key = pageKey(requestedPage);
   const cached = cachedFeed(courseId, key, Date.now());
-  if (cached) return timed("advice_feed_cached", { courseId }, async () => cached);
+  if (cached) return timed("advice_feed_cached", { courseId }, async () => forViewer(cached, viewerId));
   return timed("advice_feed", { courseId }, async () => {
     try {
       const feed = await readFeed(courseId, key);
       storeFeed(courseId, key, feed, Date.now());
-      return feed;
+      return forViewer(feed, viewerId);
     } catch (error) {
       logError("advice_feed_retrieval_failed", { courseId, errorType: errorType(error) });
       throw error;

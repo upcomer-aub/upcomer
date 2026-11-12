@@ -3,6 +3,8 @@ import type { LoadContext, Scenario } from "../scenario";
 
 // US-38 load: logged-in students open a course's advice feed while the course holds 500 pieces of advice of every scope
 // (a tenth anonymous, a tenth removed). Everything is deleted afterwards; deleting the course deletes its advice.
+// Every user shares one session, so the per-student read limit (DoS protection) is raised for the run. The feed cache is on
+// (30 s); run with ADVICE_FEED_CACHE_SECONDS=0 to measure every request reading the database.
 
 const ADVICE = 500;
 const ids = (ctx: LoadContext) => ({
@@ -12,8 +14,9 @@ const ids = (ctx: LoadContext) => ({
 const SCOPES = ["COURSE", "EXAM", "SESSION", "TOPIC", "QUESTION"] as const;
 
 const scenario: Scenario = {
-  description: `Students open /courses/<id>/advice (page 1, 20 of ${ADVICE} pieces of advice of every scope).`,
-  stages: [1, 10, 25, 50],
+  description: `Students open /courses/<id>/advice (page 1, 20 of ${ADVICE} pieces of advice of every scope; feed cache ${process.env.ADVICE_FEED_CACHE_SECONDS === "0" ? "off" : "on"}).`,
+  stages: [1, 10, 25, 50, 100],
+  serverEnv: { ADVICE_FEED_RATE_LIMIT_PER_MINUTE: "1000000" },
   async setup(ctx) {
     const id = ids(ctx);
     await ctx.db.faculty.create({ data: { id: id.faculty, code: ctx.stamp.toUpperCase().slice(0, 18) + "F", name: "Load Test Faculty" } });

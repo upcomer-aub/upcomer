@@ -5,13 +5,13 @@ import type { AdviceItem } from "@/lib/advice";
 // The course advice page (US-38) and its card on the course page.
 
 const mocks = vi.hoisted(() => ({
-  requireUser: vi.fn(), getCourseById: vi.fn(), getCourseAdvice: vi.fn(),
+  requireUser: vi.fn(), getCourseById: vi.fn(), getCourseAdvice: vi.fn(), allowAdviceFeedRead: vi.fn(),
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
 }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
-vi.mock("@/lib/advice", () => ({ getCourseAdvice: mocks.getCourseAdvice }));
+vi.mock("@/lib/advice", () => ({ getCourseAdvice: mocks.getCourseAdvice, allowAdviceFeedRead: mocks.allowAdviceFeedRead }));
 vi.mock("@/lib/my-courses-actions", () => ({ addCourseAction: vi.fn() }));
 import CourseAdvicePage from "@/app/courses/[courseId]/advice/page";
 import CoursePage from "@/app/courses/[courseId]/page";
@@ -30,6 +30,7 @@ beforeEach(() => {
   mocks.requireUser.mockReset().mockResolvedValue({ id: "student-1", role: "STUDENT" });
   mocks.getCourseById.mockReset().mockResolvedValue(course);
   mocks.getCourseAdvice.mockReset().mockResolvedValue(feed([item()]));
+  mocks.allowAdviceFeedRead.mockReset().mockReturnValue(true);
 });
 
 describe("the course advice page (US-38)", () => {
@@ -100,6 +101,16 @@ describe("the course advice page (US-38)", () => {
     expect(html).toContain("45 pieces of advice, page 2 of 3.");
     expect(html).toContain('href="/courses/course-a/advice?page=1"');
     expect(html).toContain('href="/courses/course-a/advice?page=3"');
+  });
+  it("checks the student's read limit, and when it is reached shows a message without reading the advice", async () => {
+    await page();
+    expect(mocks.allowAdviceFeedRead).toHaveBeenCalledWith("student-1");
+    mocks.getCourseAdvice.mockClear();
+    mocks.allowAdviceFeedRead.mockReturnValue(false);
+    const html = await page();
+    expect(html).toContain("Too many pages opened in a minute. Wait a moment, then reload the page.");
+    expect(html).toContain('role="alert"');
+    expect(mocks.getCourseAdvice).not.toHaveBeenCalled();
   });
   it("shows no page links for one page", async () => {
     expect(await page()).not.toContain("Advice pages");

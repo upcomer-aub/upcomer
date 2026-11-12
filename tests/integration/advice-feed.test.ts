@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { getCourseAdvice } from "@/lib/advice";
+import { getCourseAdvice, invalidateCourseAdvice, resetAdviceCache } from "@/lib/advice";
 import { ADVICE_PAGE_SIZE, ANONYMOUS_AUTHOR } from "@/lib/advice-rules";
 
 // US-38 against a real database: the feed of one course shows only that course's visible advice, newest first, with
@@ -57,6 +57,8 @@ beforeAll(async () => {
   await db.user.delete({ where: { id: gone.id } });
 });
 
+beforeEach(() => resetAdviceCache());
+
 afterAll(async () => {
   try {
     // Deleting the courses deletes their advice, papers, and groups.
@@ -111,12 +113,19 @@ describe("the course advice feed (US-38)", () => {
     expect(items.find(item => item.id === id("a5"))!.resourceUrl).toBeNull();
   });
 
-  it("drops advice from the feed once it is removed", async () => {
+  it("drops advice from the feed once it is removed and the writer invalidates the cache", async () => {
+    expect((await getCourseAdvice(courseA)).items.map(item => item.id)).toContain(id("a1"));
     await db.advice.update({ where: { id: id("a1") }, data: { status: "REMOVED", removedAt: new Date(), removedById: author.id } });
     try {
-      expect((await getCourseAdvice(courseA)).items.map(item => item.id)).not.toContain(id("a1"));
+      // Without the writer's invalidateCourseAdvice the cached page is served (at most ADVICE_FEED_CACHE_SECONDS).
+      expect((await getCourseAdvice(courseA)).items.map(item => item.id)).toContain(id("a1"));
+      invalidateCourseAdvice(courseA);
+      const feed = await getCourseAdvice(courseA);
+      expect(feed.items.map(item => item.id)).not.toContain(id("a1"));
+      expect(feed.total).toBe(6);
     } finally {
       await db.advice.update({ where: { id: id("a1") }, data: { status: "VISIBLE", removedAt: null, removedById: null } });
+      invalidateCourseAdvice(courseA);
     }
   });
 

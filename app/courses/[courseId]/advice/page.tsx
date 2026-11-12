@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdviceList } from "@/components/advice-list";
-import { getCourseAdvice } from "@/lib/advice";
+import { allowAdviceFeedRead, getCourseAdvice } from "@/lib/advice";
 import { requireUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
 
@@ -17,11 +17,17 @@ export default async function CourseAdvicePage({ params, searchParams }: {
   const { courseId } = await params;
   const { page: requestedPage } = await searchParams;
   const route = `/courses/${encodeURIComponent(courseId)}/advice`;
-  await requireUser(route);
+  const user = await requireUser(route);
   const course = await getCourseById(courseId);
   if (!course) notFound();
+  const back = <Link className="back" href={`/courses/${encodeURIComponent(courseId)}`}>← Back to {course.code}</Link>;
+  // DoS protection: a script reading page after page is stopped before it reaches the database.
+  if (!allowAdviceFeedRead(user.id)) {
+    return <>{back}<span className="eyebrow">{course.code}</span><h1>Advice from previous students</h1>
+      <p className="notice error" role="alert">Too many pages opened in a minute. Wait a moment, then reload the page.</p></>;
+  }
   const { items, total, page, totalPages } = await getCourseAdvice(courseId, requestedPage ?? 1);
-  return <><Link className="back" href={`/courses/${encodeURIComponent(courseId)}`}>← Back to {course.code}</Link>
+  return <>{back}
     <span className="eyebrow">{course.code}</span><h1>Advice from previous students</h1>
     <p className="muted">What students who took {course.code} before you suggest. This is their opinion, not statistics from previous exams.</p>
     {total > 0 && <p className="muted" role="status">{plural(total, "piece")} of advice{totalPages > 1 && `, page ${page} of ${totalPages}`}.</p>}

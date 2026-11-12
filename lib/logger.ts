@@ -83,7 +83,8 @@ type LogEvent =
   | "topic_confidence_refused"
   | "topic_confidence_rate_limited"
   | "topic_confidence_save_failed"
-  | "advice_feed_retrieval_failed";
+  | "advice_feed_retrieval_failed"
+  | "advice_feed_rate_limited";
 
 
 export type { LogEvent };
@@ -196,8 +197,9 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   topic_confidence_refused: "warn",
   topic_confidence_rate_limited: "warn",
   topic_confidence_save_failed: "error",
-  // Mohammed Al-Haiqi (Sprint 4): advice feed (US-38). Course IDs and error types only; advice text and author names are never logged.
+  // Mohammed Al-Haiqi (Sprint 4): advice feed (US-38). IDs, retry times, and error types only; advice text and author names are never logged.
   advice_feed_retrieval_failed: "error",
+  advice_feed_rate_limited: "warn",
 
 };
 

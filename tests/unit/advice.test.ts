@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { advice } = vi.hoisted(() => ({ advice: { count: vi.fn(), findMany: vi.fn() } }));
 vi.mock("@/lib/db", () => ({ db: { advice } }));
-import { getCourseAdvice, toAdviceItem, visibleCourseAdvice } from "@/lib/advice";
+import {
+  adviceCacheSeconds, adviceFeedLimit, allowAdviceFeedRead, getCourseAdvice, invalidateCourseAdvice, resetAdviceCache, toAdviceItem, visibleCourseAdvice,
+} from "@/lib/advice";
 import { ADVICE_PAGE_SIZE, ANONYMOUS_AUTHOR } from "@/lib/advice-rules";
+import { resetRateLimits } from "@/lib/rate-limit";
 
 let errors: ReturnType<typeof vi.spyOn>;
 const logged = () => errors.mock.calls.map(call => JSON.parse(String(call[0])));
@@ -17,6 +20,11 @@ const row = (overrides: Record<string, unknown> = {}) => ({
 }) as Parameters<typeof toAdviceItem>[0];
 
 beforeEach(() => {
+  resetAdviceCache();
+  resetRateLimits();
+  vi.useRealTimers();
+  delete process.env.ADVICE_FEED_CACHE_SECONDS;
+  delete process.env.ADVICE_FEED_RATE_LIMIT_PER_MINUTE;
   errors = vi.spyOn(console, "error").mockImplementation(() => {});
   advice.count.mockReset().mockResolvedValue(1);
   advice.findMany.mockReset().mockResolvedValue([row()]);
@@ -85,5 +93,75 @@ describe("getCourseAdvice", () => {
     await expect(getCourseAdvice("course-a")).rejects.toThrow("connection lost");
     expect(logged()).toContainEqual(expect.objectContaining({ event: "advice_feed_retrieval_failed", courseId: "course-a", errorType: "PrismaClientKnownRequestError" }));
     expect(JSON.stringify(logged())).not.toContain("connection lost");
+  });
+});
+
+describe("the feed cache", () => {
+  it("serves a page again from memory, per course and per page", async () => {
+    await getCourseAdvice("course-a", 1);
+    await getCourseAdvice("course-a", "1");
+    await getCourseAdvice("course-a", "abc");
+    expect(advice.findMany).toHaveBeenCalledTimes(1);
+    await getCourseAdvice("course-a", 2);
+    await getCourseAdvice("course-b", 1);
+    expect(advice.findMany).toHaveBeenCalledTimes(3);
+  });
+  it("reads the database again after invalidateCourseAdvice, for that course only", async () => {
+    await getCourseAdvice("course-a");
+    await getCourseAdvice("course-b");
+    invalidateCourseAdvice("course-a");
+    await getCourseAdvice("course-a");
+    await getCourseAdvice("course-b");
+    expect(advice.findMany).toHaveBeenCalledTimes(3);
+  });
+  it("forgets a page after ADVICE_FEED_CACHE_SECONDS", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-12T10:00:00Z"), toFake: ["Date"] });
+    process.env.ADVICE_FEED_CACHE_SECONDS = "30";
+    await getCourseAdvice("course-a");
+    vi.setSystemTime(new Date("2026-11-12T10:00:29Z"));
+    await getCourseAdvice("course-a");
+    expect(advice.findMany).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(new Date("2026-11-12T10:00:31Z"));
+    await getCourseAdvice("course-a");
+    expect(advice.findMany).toHaveBeenCalledTimes(2);
+  });
+  it("is off when ADVICE_FEED_CACHE_SECONDS is 0, and 30 s by default or for a bad value", async () => {
+    expect(adviceCacheSeconds()).toBe(30);
+    process.env.ADVICE_FEED_CACHE_SECONDS = "-5";
+    expect(adviceCacheSeconds()).toBe(30);
+    process.env.ADVICE_FEED_CACHE_SECONDS = "0";
+    await getCourseAdvice("course-a");
+    await getCourseAdvice("course-a");
+    expect(advice.findMany).toHaveBeenCalledTimes(2);
+  });
+  it("never caches a failed read", async () => {
+    advice.findMany.mockRejectedValueOnce(new Error("down"));
+    await expect(getCourseAdvice("course-a")).rejects.toThrow("down");
+    expect((await getCourseAdvice("course-a")).items).toHaveLength(1);
+  });
+  it("keeps at most 50 pages of a course, so walking every page number cannot grow memory without bound", async () => {
+    advice.count.mockResolvedValue(10_000 * ADVICE_PAGE_SIZE);
+    for (let page = 1; page <= 60; page++) await getCourseAdvice("course-a", page);
+    expect(advice.findMany).toHaveBeenCalledTimes(60);
+    // Page 1 was the first in, so it was dropped; page 60 is still there.
+    await getCourseAdvice("course-a", 60);
+    expect(advice.findMany).toHaveBeenCalledTimes(60);
+    await getCourseAdvice("course-a", 1);
+    expect(advice.findMany).toHaveBeenCalledTimes(61);
+  });
+});
+
+describe("the feed read limit (DoS protection)", () => {
+  it("allows 120 reads a minute per student by default, then refuses and logs the student's ID only", () => {
+    expect(adviceFeedLimit()).toBe(120);
+    for (let read = 0; read < 120; read++) expect(allowAdviceFeedRead("student-1")).toBe(true);
+    expect(allowAdviceFeedRead("student-1")).toBe(false);
+    expect(logged()).toEqual([expect.objectContaining({ event: "advice_feed_rate_limited", level: "warn", userId: "student-1", retryAfterSeconds: expect.any(String) })]);
+  });
+  it("counts each student apart, so one student's flood does not block another", () => {
+    process.env.ADVICE_FEED_RATE_LIMIT_PER_MINUTE = "3";
+    for (let read = 0; read < 3; read++) allowAdviceFeedRead("flooder");
+    expect(allowAdviceFeedRead("flooder")).toBe(false);
+    expect(allowAdviceFeedRead("student-2")).toBe(true);
   });
 });

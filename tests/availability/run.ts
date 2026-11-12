@@ -112,9 +112,10 @@ const APIS: Api[] = [
   } },
   // US-43: each user reports the same advice (by no user). Their first report is sent and later ones are refused as
   // duplicates; both are correct, anything else (a refusal of another kind, or no redirect) is not.
-  { name: "POST /courses/:courseId/advice (report advice)", weight: 5, async run(user, world) {
+  { name: "POST /courses/:courseId/advice/:adviceId/report (report advice)", weight: 5, async run(user, world) {
     const course = world.courses[0];
-    const reply = await user.client.postAction(`/courses/${course.id}/advice`, world.actions.reportAdvice, {
+    // Posted to the report page, where the form is: Next.js finds a form's action only on its own page.
+    const reply = await user.client.postAction(`/courses/${course.id}/advice/${world.advice.reportable}/report`, world.actions.reportAdvice, {
       courseId: course.id, adviceId: world.advice.reportable, reason: "SPAM", note: "", page: "1",
     }, TIMEOUT_MS);
     const feed = `/courses/${course.id}/advice?`;

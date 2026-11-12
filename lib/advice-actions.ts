@@ -22,7 +22,8 @@ export async function editAdviceAction(formData: FormData) {
   const editRoute = `${feedRoute(courseId)}/${encodeURIComponent(adviceId)}/edit`;
   const user = await requireUser(editRoute);
   const result = await editAdvice(user.id, { adviceId, body: field(formData, "body"), resourceUrl: field(formData, "resourceUrl") });
-  if (result.ok) redirect(`${feedRoute(result.courseId)}?${backTo(formData)}${result.changed ? "edited" : "unchanged"}=1#advice-${encodeURIComponent(adviceId)}`);
+  // No #advice-… anchor: Next.js drops the fragment of a server action's redirect.
+  if (result.ok) redirect(`${feedRoute(result.courseId)}?${backTo(formData)}${result.changed ? "edited" : "unchanged"}=1`);
   // Advice that is not the author's (or no longer shown) has no edit page to go back to.
   if (result.error === "not_found") redirect(`${feedRoute(courseId)}?change_error=not_found`);
   const page = backTo(formData);

@@ -27,17 +27,17 @@ beforeEach(() => {
 
 describe("editAdviceAction", () => {
   it("saves for the logged-in student and returns to the advice in the feed", async () => {
-    await expect(editAdviceAction(edit())).rejects.toThrow("NEXT_REDIRECT /courses/course-a/advice?edited=1#advice-advice-1");
+    await expect(editAdviceAction(edit())).rejects.toThrow("NEXT_REDIRECT /courses/course-a/advice?edited=1");
     expect(requireUser).toHaveBeenCalledWith("/courses/course-a/advice/advice-1/edit");
     expect(editAdvice).toHaveBeenCalledWith("student-1", { adviceId: "advice-1", body: "New advice.", resourceUrl: "" });
   });
   it("returns to the feed page the author came from, and says when nothing changed", async () => {
     editAdvice.mockResolvedValue({ ok: true, courseId: "course-a", changed: false });
-    await expect(editAdviceAction(edit({ page: "3" }))).rejects.toThrow("NEXT_REDIRECT /courses/course-a/advice?page=3&unchanged=1#advice-advice-1");
+    await expect(editAdviceAction(edit({ page: "3" }))).rejects.toThrow("NEXT_REDIRECT /courses/course-a/advice?page=3&unchanged=1");
   });
   it("goes to the stored advice's course, not the form's", async () => {
     editAdvice.mockResolvedValue({ ok: true, courseId: "course-b", changed: true });
-    await expect(editAdviceAction(edit())).rejects.toThrow("NEXT_REDIRECT /courses/course-b/advice?edited=1#advice-advice-1");
+    await expect(editAdviceAction(edit())).rejects.toThrow("NEXT_REDIRECT /courses/course-b/advice?edited=1");
   });
   it("sends a refused draft back to the edit page with the reason, never the text", async () => {
     editAdvice.mockResolvedValue({ ok: false, error: "too_long" });

@@ -89,7 +89,11 @@ type LogEvent =
   | "advice_deleted"
   | "advice_change_refused"
   | "advice_change_rate_limited"
-  | "advice_change_failed";
+  | "advice_change_failed"
+  | "advice_report_submitted"
+  | "advice_report_refused"
+  | "advice_report_rate_limited"
+  | "advice_report_failed";
 
 
 export type { LogEvent };
@@ -212,6 +216,12 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   advice_change_refused: "warn",
   advice_change_rate_limited: "warn",
   advice_change_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): reporting advice (US-43). IDs, the reason category, and refusal reasons only; the note
+  // and the advice text are never logged.
+  advice_report_submitted: "info",
+  advice_report_refused: "warn",
+  advice_report_rate_limited: "warn",
+  advice_report_failed: "error",
 
 };
 

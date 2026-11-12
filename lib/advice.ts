@@ -80,8 +80,10 @@ type CachedFeed = { feed: SharedFeed; expiresAt: number };
 const feedCache = new Map<string, Map<number, CachedFeed>>();
 
 export function adviceCacheSeconds() {
-  const value = Number(process.env.ADVICE_FEED_CACHE_SECONDS);
-  return process.env.ADVICE_FEED_CACHE_SECONDS !== undefined && Number.isFinite(value) && value >= 0 ? value : 30;
+  // Unset or empty (as in .env.example) means the default; Number("") would be 0 and turn the cache off.
+  const raw = process.env.ADVICE_FEED_CACHE_SECONDS?.trim();
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value >= 0 ? value : 30;
 }
 
 const pageKey = (requested: unknown) => {

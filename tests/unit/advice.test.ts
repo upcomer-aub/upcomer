@@ -129,6 +129,11 @@ describe("the feed cache", () => {
     expect(adviceCacheSeconds()).toBe(30);
     process.env.ADVICE_FEED_CACHE_SECONDS = "-5";
     expect(adviceCacheSeconds()).toBe(30);
+    // Empty, as .env.example leaves it, is the default too, not 0.
+    process.env.ADVICE_FEED_CACHE_SECONDS = "";
+    expect(adviceCacheSeconds()).toBe(30);
+    process.env.ADVICE_FEED_CACHE_SECONDS = " ";
+    expect(adviceCacheSeconds()).toBe(30);
     process.env.ADVICE_FEED_CACHE_SECONDS = "0";
     await getCourseAdvice("course-a");
     await getCourseAdvice("course-a");

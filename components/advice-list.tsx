@@ -2,11 +2,13 @@ import Link from "next/link";
 import type { FeedItem } from "@/lib/advice";
 import { adviceDate, ANONYMOUS_AUTHOR, SCOPE_PREFIX, type AdviceAbout as About } from "@/lib/advice-rules";
 import styles from "./advice-list.module.css";
+import { ReportAdviceForm } from "./report-advice";
 
 // One course's advice from previous students (US-38), newest first. Every item is labelled as student advice, so it is
 // never mistaken for the exam statistics of the Upcomer Exam. The author line comes ready from lib/advice.ts: an
 // anonymous author's name never reaches this component. The viewer's own advice (US-36) is marked as theirs, with a link
-// to edit or delete it; only they see that.
+// to edit or delete it; only they see that. Other students' advice can be reported (US-43), once per student until an
+// admin decides.
 
 // What one advice is about, for the feed and the edit page.
 export function AdviceAbout({ courseId, about }: { courseId: string; about: About }) {
@@ -22,7 +24,9 @@ export function AdviceAbout({ courseId, about }: { courseId: string; about: Abou
   }
 }
 
-export function AdviceList({ courseId, items, page = 1 }: { courseId: string; items: FeedItem[]; page?: number }) {
+export function AdviceList({ courseId, items, page = 1, reported = new Set() }: {
+  courseId: string; items: FeedItem[]; page?: number; reported?: ReadonlySet<string>;
+}) {
   return <ol className={`list ${styles.feed}`} aria-label="Advice from previous students">
     {items.map(item => <li key={item.id}>
       <article className={`card ${styles.advice}`} id={`advice-${item.id}`} aria-labelledby={`advice-${item.id}-about`}>
@@ -39,6 +43,9 @@ export function AdviceList({ courseId, items, page = 1 }: { courseId: string; it
           {item.anonymous && <span className="muted">Others see you as {ANONYMOUS_AUTHOR}. </span>}
           <Link href={`/courses/${encodeURIComponent(courseId)}/advice/${encodeURIComponent(item.id)}/edit${page > 1 ? `?page=${page}` : ""}`}>Edit or delete</Link>
         </p>}
+        {!item.mine && (reported.has(item.id)
+          ? <p className="muted">You reported this advice. An admin will check it.</p>
+          : <ReportAdviceForm courseId={courseId} adviceId={item.id} page={page} />)}
       </article>
     </li>)}
   </ol>;

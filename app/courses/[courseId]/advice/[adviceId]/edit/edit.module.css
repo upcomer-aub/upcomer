@@ -1,0 +1,10 @@
+/* Deleting cannot be undone, so its button looks different from saving. */
+.delete {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.deleteSection h2 {
+  margin: 0;
+}

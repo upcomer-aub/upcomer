@@ -17,3 +17,12 @@
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
+
+/* The viewer's own advice (US-36). */
+.mine {
+  color: var(--primary);
+}
+
+.own {
+  font-size: 0.92rem;
+}

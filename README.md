@@ -45,6 +45,7 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/courses/:courseId/exam` | The Upcomer Exam: every distinct question once, most likely first. Logged-in students can report a question under it, mark questions done and continue where they stopped (US-21), and switch to their personal order (US-28); optional `reported`, `report_error`, `progress_error`, `at`, and `order=personal` query parameters |
 | `/courses/:courseId/confidence` | Rate your confidence in each of the course's topics, 1 to 5 or Skip (US-24); requires a session. Optional `saved` and `error` query parameters |
 | `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter. The viewer's own advice is marked "Your advice" with an "Edit or delete" link (US-36); other students' advice links to "Report this advice" (US-43) |
+| `/admin/advice-reports` | Admin queue of reported advice (US-77): remove the advice or keep it; at most 60 decisions per admin per minute. Students get a 404 |
 | `/courses/:courseId/advice/:adviceId/report` | A student reports another student's advice (US-43), at most 10 reports per student per minute; advice no longer shown is a 404, and one's own or already reported advice offers no form. Requires a session |
 | `/courses/:courseId/advice/:adviceId/edit` | The author edits or deletes their own advice (US-36), at most 20 changes per student per minute; anyone else's advice is a 404. Requires a session |
 | `/courses/:courseId/questions` | The course's question bank, most frequent first; optional `q`, `year`, `termId`, `examType`, and `professorId` query parameters |
@@ -436,6 +437,24 @@ Each other student's advice in the feed links to "Report this advice", a page (`
 
 The service is `lib/advice-reports.ts` (rules in `lib/advice-report-rules.ts`, action in `lib/advice-report-actions.ts`) the page is `app/courses/[courseId]/advice/[adviceId]/report/page.tsx`, and the form is `components/report-advice.tsx`. The form has its own page so the feed stays as light as before: with a form under all 20 advice, a feed page took about 40 ms longer to render. Tests: `tests/unit/advice-reports.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-reports.test.ts`, and `tests/e2e/advice-reports.spec.ts`; `npm run availability` sends reports too. Details and results: `ADVICE_REPORTS_REPORT.md`.
 
+### Moderating reported advice (US-77)
+
+Admins open `/admin/advice-reports` (linked from the catalog as "Advice reports"). Each advice with open reports is shown once, the one reported longest ago first, 20 a page: the advice as students see it, how many students reported it, the reasons, and their details. The admin decides:
+
+- **Remove advice:** the advice becomes `REMOVED` (`removedById` = the admin) and leaves every student-facing list at once (the feed's cache is cleared); all its open reports become `RESOLVED`.
+- **Keep advice:** the advice stays; all its open reports become `DISMISSED`. Students can report it again later.
+- Advice its author deleted after it was reported is marked so, with only **Close reports**.
+
+Rules:
+
+- **Admins only.** The page and the action call `requireAdmin()`: a student gets the not-found page, also when sending the admin's form with its real action ID (tested end to end), and a visitor is sent to log in.
+- **Minimum information.** The queue shows the advice as students see it, so an anonymous author stays anonymous here too, and never shows who reported it. The author and reporter are kept in the database for abuse handling outside this page.
+- **One decision.** A decision only closes open reports, so when two admins decide at once (or one decides from a page opened before another's decision), the second changes nothing and is told the advice has no open reports any more. An admin cannot remove advice nobody reported from this page.
+- **DoS protection.** At most `ADVICE_MODERATION_RATE_LIMIT_PER_MINUTE` decisions (default 60) per admin per minute.
+- **Logs.** `advice_removed_by_admin` and `advice_reports_dismissed` (info, with how many reports were closed), `advice_moderation_refused`, `advice_moderation_rate_limited` (warn), `advice_moderation_failed` and `advice_report_queue_failed` (error), with IDs only, never the advice text or a note. Timed as `advice_report_queue` and `advice_moderation`.
+
+The service is `lib/advice-moderation.ts`, the action `lib/advice-moderation-actions.ts`, and the page `app/admin/advice-reports/page.tsx`. Tests: `tests/unit/advice-moderation.test.ts`, `tests/unit/advice-moderation-page.test.tsx`, `tests/integration/advice-moderation.test.ts`, and `tests/e2e/advice-moderation.spec.ts`; the load test is `npm run load -- advice-moderation`. Details and results: `ADVICE_MODERATION_REPORT.md`.
+
 ## Exam pipeline integration tests (US-92)
 
 `tests/integration/exam-pipeline.test.ts` runs the exam pipeline end to end against a real database: five sample exam PDFs (built in `tests/integration/fixtures/sample-exams.ts`) are uploaded through `POST /api/admin/uploads`, their questions extracted, grouped and ranked by `rebuildQuestionBank`, and the result checked against the expected consolidated ordered exam (`getConsolidatedExam`), question by question, with counts, tiers, and papers. Other tests cover upload order, concurrent uploads, pending and rejected submissions, materials, deleted and re-tagged papers, non-admin uploads, and a 20-paper course within 1 s per stage. They run in CI with `npm run test:integration`.
@@ -666,6 +685,10 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mohammed Al-Haiqi (Sprint 4) | `advice_report_refused` | warn | `adviceId`, `reason`, `userId` |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_report_rate_limited` | warn | `userId`, `retryAfterSeconds` |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_report_failed` | error | `adviceId`, `userId`, `errorType` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_removed_by_admin`, `advice_reports_dismissed` | info | `adviceId`, `courseId`, `adminId`, `closedReports`, `adviceRemoved` (never the text) |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_moderation_refused` | warn | `adviceId`, `decision`, `reason`, `adminId` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_moderation_rate_limited` | warn | `adminId`, `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_moderation_failed`, `advice_report_queue_failed` | error | `adviceId`, `adminId`, `errorType` |
 
 ### What is never logged
 

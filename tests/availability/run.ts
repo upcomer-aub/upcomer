@@ -16,7 +16,7 @@ import {
 
 // npm run availability: availability and reliability of every API as the number of concurrent users grows.
 // It builds and starts the production app, then runs a realistic mix of student requests (catalog search, course pages,
-// exam lists, question bank, ordered exam, student advice, editing one's own advice, reporting advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
+// exam lists, question bank, ordered exam, student advice, editing one's own advice, reporting advice, the admin-only advice queue, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
 // 50, and 100 users at once. Every request is recorded per API as available or not (timeout, connection error, 5xx, or an
 // unexpected status), correct or not, and how long it took. The report compares availability, error rates, latency
 // percentiles, throughput, timeouts, and error types across the user counts, with machine CPU, server memory, database
@@ -120,6 +120,11 @@ const APIS: Api[] = [
     }, TIMEOUT_MS);
     const feed = `/courses/${course.id}/advice?`;
     return { reply, expected: [303], correct: reply.location === `${feed}reported=1` || reply.location === `${feed}report_error=duplicate` };
+  } },
+  // US-77: the moderation queue is for admins only; a student must get the not-found page, never the queue.
+  { name: "GET /admin/advice-reports (student refused)", weight: 2, async run(user) {
+    const reply = await user.client.get("/admin/advice-reports", TIMEOUT_MS);
+    return { reply, expected: [404], correct: !reply.body.includes("Advice Reports") && !reply.body.includes("Remove advice") };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);

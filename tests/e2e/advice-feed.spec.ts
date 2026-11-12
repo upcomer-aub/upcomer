@@ -18,6 +18,7 @@ const paperTitle = `Final 2024 ${stamp}`;
 const password = "password123";
 const reader = { id: `qa-adv-reader-${stamp}`, email: `qa-adv-reader-${stamp}@mail.aub.edu`, name: "Advice Reader" };
 const named = { id: `qa-adv-named-${stamp}`, email: `qa-adv-named-${stamp}@mail.aub.edu`, name: `Named Senior ${stamp}` };
+const flooder = { id: `qa-adv-flood-${stamp}`, email: `qa-adv-flood-${stamp}@mail.aub.edu`, name: "Advice Flooder" };
 const hidden = { id: `qa-adv-hidden-${stamp}`, email: `qa-adv-hidden-${stamp}@mail.aub.edu`, name: `Hidden Senior ${stamp}` };
 const advice = {
   course: `Do every past final twice. ${stamp}`,
@@ -34,7 +35,7 @@ const db = new PrismaClient();
 test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 10);
-  await db.user.createMany({ data: [reader, named, hidden].map(user => ({ ...user, passwordHash })) });
+  await db.user.createMany({ data: [reader, named, hidden, flooder].map(user => ({ ...user, passwordHash })) });
   await db.course.createMany({ data: [
     { id: courseId, code: `QA${stamp}`, name: `Advice Course ${stamp}`, facultyId: "faculty-eng" },
     { id: otherCourseId, code: `QO${stamp}`, name: `Other Advice Course ${stamp}`, facultyId: "faculty-eng" },
@@ -61,7 +62,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   try {
-    const userIds = [reader, named, hidden].map(user => user.id);
+    const userIds = [reader, named, hidden, flooder].map(user => user.id);
     await db.$transaction([
       db.course.deleteMany({ where: { id: { in: [courseId, otherCourseId, busyCourseId] } } }),
       db.term.deleteMany({ where: { id: termId } }),
@@ -79,9 +80,9 @@ async function fillLogIn(page: Page, email: string) {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Log in" }).click();
 }
-async function logIn(page: Page) {
+async function logIn(page: Page, email = reader.email) {
   await page.goto("/login");
-  await fillLogIn(page, reader.email);
+  await fillLogIn(page, email);
   await expect(page).toHaveURL(/\/my-courses$/);
 }
 const posts = (page: Page) => page.getByRole("list", { name: "Advice from previous students" }).getByRole("article");
@@ -158,4 +159,31 @@ test("an unknown course shows the not-found page", async ({ page }) => {
   await logIn(page);
   const response = await page.goto(`/courses/qa-no-such-course-${stamp}/advice`);
   expect(response?.status()).toBe(404);
+});
+
+test("DoS: a student opening the feed over and over is stopped after 120 reads a minute; another student is not", async ({ page, browser }) => {
+  await logIn(page, flooder.email);
+  // From inside the page, so the session cookie is sent the way the browser sends it.
+  const statuses = await page.evaluate(async url => {
+    const limited: number[] = [];
+    for (let read = 1; read <= 125; read++) {
+      const html = await (await fetch(`${url}?page=${read}`)).text();
+      if (html.includes("Too many pages opened in a minute")) limited.push(read);
+    }
+    return limited;
+  }, feed);
+  expect(statuses).toEqual([121, 122, 123, 124, 125]);
+  await page.goto(feed);
+  // Next.js adds its own empty role="alert" route announcer, so the notice is found by its text.
+  await expect(page.getByRole("alert").filter({ hasText: "Too many pages" })).toHaveText("Too many pages opened in a minute. Wait a moment, then reload the page.");
+  await expect(page.getByText(advice.course)).toHaveCount(0);
+
+  const other = await browser.newPage();
+  try {
+    await logIn(other);
+    await other.goto(feed);
+    await expect(post(other, advice.course)).toBeVisible();
+  } finally {
+    await other.close();
+  }
 });

@@ -93,7 +93,13 @@ type LogEvent =
   | "advice_report_submitted"
   | "advice_report_refused"
   | "advice_report_rate_limited"
-  | "advice_report_failed";
+  | "advice_report_failed"
+  | "advice_report_queue_failed"
+  | "advice_removed_by_admin"
+  | "advice_reports_dismissed"
+  | "advice_moderation_refused"
+  | "advice_moderation_rate_limited"
+  | "advice_moderation_failed";
 
 
 export type { LogEvent };
@@ -222,6 +228,14 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   advice_report_refused: "warn",
   advice_report_rate_limited: "warn",
   advice_report_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): moderation of reported advice (US-77). IDs, the decision, counts, and refusal reasons
+  // only; the advice text and report notes are never logged.
+  advice_report_queue_failed: "error",
+  advice_removed_by_admin: "info",
+  advice_reports_dismissed: "info",
+  advice_moderation_refused: "warn",
+  advice_moderation_rate_limited: "warn",
+  advice_moderation_failed: "error",
 
 };
 

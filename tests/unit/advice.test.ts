@@ -151,6 +151,32 @@ describe("the feed cache", () => {
   });
 });
 
+describe("the viewer's own advice (US-36)", () => {
+  it("marks only the viewer's own advice as theirs, without handing any author ID to the page", async () => {
+    advice.count.mockResolvedValue(3);
+    advice.findMany.mockResolvedValue([row({ id: "a1", authorId: "student-1" }), row({ id: "a2", authorId: "student-2" }), row({ id: "a3", authorId: null })]);
+    const feed = await getCourseAdvice("course-a", 1, "student-1");
+    expect(feed.items.map(item => [item.id, item.mine])).toEqual([["a1", true], ["a2", false], ["a3", false]]);
+    expect(JSON.stringify(feed)).not.toMatch(/student-1|student-2/);
+    expect(advice.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ authorId: true }) }));
+  });
+  it("marks an anonymous author's advice as theirs for them alone, and never names them", async () => {
+    advice.findMany.mockResolvedValue([row({ anonymous: true, authorId: "student-1" })]);
+    const own = await getCourseAdvice("course-a", 1, "student-1");
+    const other = await getCourseAdvice("course-a", 1, "student-2");
+    expect(own.items[0]).toMatchObject({ mine: true, author: ANONYMOUS_AUTHOR });
+    expect(other.items[0]).toMatchObject({ mine: false, author: ANONYMOUS_AUTHOR });
+    expect(JSON.stringify([own, other])).not.toContain("Lea Tass");
+  });
+  it("works from the cached page: one database read serves every viewer, each with their own marks", async () => {
+    advice.findMany.mockResolvedValue([row({ authorId: "student-1" })]);
+    expect((await getCourseAdvice("course-a", 1, "student-1")).items[0].mine).toBe(true);
+    expect((await getCourseAdvice("course-a", 1, "student-2")).items[0].mine).toBe(false);
+    expect((await getCourseAdvice("course-a", 1)).items[0].mine).toBe(false);
+    expect(advice.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("the feed read limit (DoS protection)", () => {
   it("allows 120 reads a minute per student by default, then refuses and logs the student's ID only", () => {
     expect(adviceFeedLimit()).toBe(120);

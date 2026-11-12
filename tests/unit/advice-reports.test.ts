@@ -3,19 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Reporting advice (US-43) with the database mocked: the reason and note rules, one open report per student and advice,
 // no reports of one's own or removed advice, the rate limit, nothing typed logged, and the action's redirects.
 
-const { tx, adviceReport, transaction, requireUser, redirect } = vi.hoisted(() => ({
+const { tx, adviceReport, advice: adviceTable, transaction, requireUser, redirect } = vi.hoisted(() => ({
   tx: { $executeRaw: vi.fn(), advice: { findFirst: vi.fn() }, adviceReport: { findFirst: vi.fn(), create: vi.fn() } },
-  adviceReport: { findMany: vi.fn() },
+  adviceReport: { findMany: vi.fn(), count: vi.fn() },
+  advice: { findFirst: vi.fn() },
   transaction: vi.fn(),
   requireUser: vi.fn(),
   redirect: vi.fn((location: string) => { throw new Error(`NEXT_REDIRECT ${location}`); }),
 }));
-vi.mock("@/lib/db", () => ({ db: { $transaction: transaction, adviceReport } }));
+vi.mock("@/lib/db", () => ({ db: { $transaction: transaction, adviceReport, advice: adviceTable } }));
 vi.mock("@/lib/auth", () => ({ requireUser }));
 vi.mock("next/navigation", () => ({ redirect }));
 import { reportAdviceAction } from "@/lib/advice-report-actions";
 import { adviceReportMessage, ADVICE_REPORT_REASONS, MAX_ADVICE_REPORT_NOTE_LENGTH } from "@/lib/advice-report-rules";
-import { adviceReportLimit, getOpenReportedAdviceIds, reportAdvice } from "@/lib/advice-reports";
+import { adviceReportLimit, getOpenReportedAdviceIds, getReportableAdvice, reportAdvice } from "@/lib/advice-reports";
 import { resetRateLimits } from "@/lib/rate-limit";
 
 let errors: ReturnType<typeof vi.spyOn>;
@@ -43,6 +44,8 @@ beforeEach(() => {
   tx.adviceReport.findFirst.mockReset().mockResolvedValue(null);
   tx.adviceReport.create.mockReset().mockResolvedValue({ id: "report-1", courseId: "course-a" });
   adviceReport.findMany.mockReset().mockResolvedValue([]);
+  adviceReport.count.mockReset().mockResolvedValue(0);
+  adviceTable.findFirst.mockReset().mockResolvedValue(null);
   requireUser.mockReset().mockResolvedValue({ id: "student-1" });
   redirect.mockClear();
 });
@@ -130,6 +133,34 @@ describe("getOpenReportedAdviceIds", () => {
   });
 });
 
+describe("getReportableAdvice", () => {
+  const stored = {
+    id: "advice-1", authorId: "author-1", body: "Skip the labs.", anonymous: true, scope: "COURSE", topic: null, resourceUrl: null, editedAt: null,
+    createdAt: new Date("2026-11-10T09:00:00Z"), author: { name: "Real Author" }, file: null, term: null, questionGroup: null,
+  };
+  it("finds only advice shown in the course, as students see it, without the author's ID or an anonymous author's name", async () => {
+    adviceTable.findFirst.mockResolvedValue(stored);
+    const found = await getReportableAdvice("student-1", "course-a", "advice-1");
+    expect(adviceTable.findFirst.mock.calls[0][0].where).toMatchObject({ courseId: "course-a", status: "VISIBLE", id: "advice-1" });
+    expect(found).toMatchObject({ own: false, reported: false, advice: { id: "advice-1", author: "Anonymous student", body: "Skip the labs." } });
+    expect(JSON.stringify(found)).not.toContain("author-1");
+    expect(JSON.stringify(found)).not.toContain("Real Author");
+  });
+  it("says when it is the student's own advice, or when they already have an open report of it", async () => {
+    adviceTable.findFirst.mockResolvedValue(stored);
+    expect(await getReportableAdvice("author-1", "course-a", "advice-1")).toMatchObject({ own: true, reported: false });
+    expect(adviceReport.count).not.toHaveBeenCalled();
+    adviceReport.count.mockResolvedValue(1);
+    expect(await getReportableAdvice("student-1", "course-a", "advice-1")).toMatchObject({ own: false, reported: true });
+    expect(adviceReport.count).toHaveBeenCalledWith({ where: { adviceId: "advice-1", reporterId: "student-1", status: "OPEN" } });
+  });
+  it("is null for advice not shown in the course, and reads nothing for an empty ID", async () => {
+    expect(await getReportableAdvice("student-1", "course-a", "advice-1")).toBeNull();
+    expect(await getReportableAdvice("student-1", "course-a", "")).toBeNull();
+    expect(adviceTable.findFirst).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("the report rules", () => {
   it("lists five reasons; unknown errors get the general message", () => {
     expect(ADVICE_REPORT_REASONS.map(reason => reason.value)).toEqual(["OFFENSIVE", "SPAM", "PERSONAL_INFO", "ACADEMIC_DISHONESTY", "OTHER"]);
@@ -150,6 +181,12 @@ describe("reportAdviceAction", () => {
     tx.adviceReport.findFirst.mockResolvedValue({ id: "report-0" });
     expect(await redirectedTo(reportAdviceAction(form({ courseId: "course-a", page: "x", ...valid })))).toBe("/courses/course-a/advice?report_error=duplicate");
     expect(redirect.mock.calls.flat().join(" ")).not.toContain("insults");
+  });
+  it("sends a reason or note to fix, or the rate limit, back to the report page", async () => {
+    expect(await redirectedTo(reportAdviceAction(form({ courseId: "course-a", ...valid, reason: "MADE_UP", page: "2" }))))
+      .toBe("/courses/course-a/advice/advice-1/report?page=2&error=invalid_reason");
+    expect(await redirectedTo(reportAdviceAction(form({ courseId: "course-a", ...valid, note: "a".repeat(MAX_ADVICE_REPORT_NOTE_LENGTH + 1) }))))
+      .toBe("/courses/course-a/advice/advice-1/report?error=note_too_long");
   });
   it("keeps a hand-made course ID inside its path segment", async () => {
     tx.advice.findFirst.mockResolvedValue(null);

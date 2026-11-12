@@ -63,24 +63,35 @@ async function logIn(page: Page, email: string) {
   await expect(page).toHaveURL(/\/my-courses$/);
 }
 const post = (page: Page, body: string) => page.getByRole("list", { name: "Advice from previous students" }).getByRole("article").filter({ hasText: body });
+async function openReport(page: Page, body: string) {
+  await post(page, body).getByRole("link", { name: "Report this advice" }).click();
+  await expect(page.getByRole("heading", { name: "Report this advice" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The advice you are reporting" })).toContainText(body);
+}
+async function sendReport(page: Page, reason: string, note = "") {
+  await page.getByLabel(reason).check();
+  if (note) await page.getByLabel("Details for the admin (optional)").fill(note);
+  await page.getByRole("button", { name: "Send report" }).click();
+}
 async function report(page: Page, body: string, reason: string, note = "") {
-  const card = post(page, body);
-  await card.getByText("Report this advice").click();
-  await card.getByLabel(reason).check();
-  if (note) await card.getByLabel("Details for the admin (optional)").fill(note);
-  await card.getByRole("button", { name: "Send report" }).click();
+  await openReport(page, body);
+  await sendReport(page, reason, note);
 }
 const reportsOf = (adviceId: string) => db.adviceReport.findMany({ where: { adviceId } });
 
 test("a student reports advice with a reason and details; it is linked to the advice, and the feed says it was reported", async ({ page }) => {
   await logIn(page, reporter.email);
   await page.goto(feed);
-  await expect(post(page, text.own).getByText("Report this advice")).toHaveCount(0);
+  await expect(post(page, text.own).getByRole("link", { name: "Report this advice" })).toHaveCount(0);
   await report(page, text.rude, "It is insulting, harassing, or hateful", "It names and insults a TA.");
   await expect(page).toHaveURL(new RegExp(`${feed}\\?reported=1$`));
   await expect(page.getByRole("status").filter({ hasText: "Thanks, your report was sent." })).toBeVisible();
   await expect(post(page, text.rude)).toContainText("You reported this advice. An admin will check it.");
-  await expect(post(page, text.rude).getByText("Report this advice")).toHaveCount(0);
+  await expect(post(page, text.rude).getByRole("link", { name: "Report this advice" })).toHaveCount(0);
+  // Its report page says so too, instead of offering the form.
+  await page.goto(`${feed}/${ids.rude}/report`);
+  await expect(page.getByText("You already reported this advice. An admin will check it.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send report" })).toHaveCount(0);
   expect(await reportsOf(ids.rude)).toEqual([expect.objectContaining({
     courseId, reporterId: reporter.id, reason: "OFFENSIVE", note: "It names and insults a TA.", status: "OPEN",
   })]);
@@ -91,6 +102,7 @@ test("a student reports advice with a reason and details; it is linked to the ad
 test("a second report of the same advice, from a page opened before the first, is refused and stored once", async ({ page, browser }) => {
   await logIn(page, reporter.email);
   await page.goto(feed);
+  await openReport(page, text.anon);
   const second = await browser.newPage();
   try {
     await second.context().addCookies(await page.context().cookies());
@@ -101,7 +113,7 @@ test("a second report of the same advice, from a page opened before the first, i
     await second.close();
   }
   // The first page still shows the form.
-  await report(page, text.anon, "Something else");
+  await sendReport(page, "Something else");
   await expect(page).toHaveURL(new RegExp(`${feed}\\?report_error=duplicate$`));
   await expect(page.getByRole("alert").filter({ hasText: "already reported" })).toHaveText("You already reported this advice. An admin will check it.");
   expect(await reportsOf(ids.anon)).toEqual([expect.objectContaining({ reason: "SPAM" })]);
@@ -118,6 +130,7 @@ test("reporting an anonymous advice shows nobody its author", async ({ page }) =
 test("advice its author deleted after the page was opened cannot be reported any more", async ({ page, browser }) => {
   await logIn(page, reporter.email);
   await page.goto(feed);
+  await openReport(page, text.gone);
   // The author deletes it from their own edit page (US-36), which also clears the feed's cache.
   const authorPage = await browser.newPage();
   try {
@@ -128,29 +141,38 @@ test("advice its author deleted after the page was opened cannot be reported any
   } finally {
     await authorPage.close();
   }
-  await report(page, text.gone, "Something else");
+  await sendReport(page, "Something else");
   await expect(page).toHaveURL(new RegExp(`${feed}\\?report_error=not_found$`));
   await expect(page.getByRole("alert").filter({ hasText: "no longer shown" })).toBeVisible();
   await expect(page.getByText(text.gone)).toHaveCount(0);
   expect(await reportsOf(ids.gone)).toEqual([]);
+  // Its report page is gone too.
+  expect((await page.goto(`${feed}/${ids.gone}/report`))?.status()).toBe(404);
 });
 
 test("a forged form cannot report one's own advice nor use a reason not on the list", async ({ page }) => {
   await logIn(page, reporter.email);
   await page.goto(feed);
-  const card = post(page, `Spam 0. ${stamp}`);
-  await card.getByText("Report this advice").click();
-  await card.locator('input[name="adviceId"]').evaluate((input, target) => { (input as HTMLInputElement).value = target; }, ids.own);
-  await card.getByLabel("Something else").check();
-  await card.getByRole("button", { name: "Send report" }).click();
+  // Their own advice has no report page form.
+  await page.goto(`${feed}/${ids.own}/report`);
+  await expect(page.getByRole("note").filter({ hasText: "your own advice" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send report" })).toHaveCount(0);
+
+  // Another advice's form, pointed at their own advice.
+  await page.goto(feed);
+  await openReport(page, `Spam 0. ${stamp}`);
+  await page.locator('input[name="adviceId"]').evaluate((input, target) => { (input as HTMLInputElement).value = target; }, ids.own);
+  await sendReport(page, "Something else");
   await expect(page.getByRole("alert").filter({ hasText: "your own advice" })).toHaveText("This is your own advice. To take it down, edit or delete it instead.");
 
-  const again = post(page, `Spam 0. ${stamp}`);
-  await again.getByText("Report this advice").click();
-  await again.getByLabel("Something else").check();
-  await again.locator('input[name="reason"]:checked').evaluate((input) => { (input as HTMLInputElement).value = "MADE_UP"; });
-  expect(await again.locator('input[name="reason"]:checked').inputValue()).toBe("MADE_UP");
-  await again.getByRole("button", { name: "Send report" }).click();
+  await page.goto(feed);
+  await openReport(page, `Spam 0. ${stamp}`);
+  await page.getByLabel("Something else").check();
+  await page.locator('input[name="reason"]:checked').evaluate((input) => { (input as HTMLInputElement).value = "MADE_UP"; });
+  expect(await page.locator('input[name="reason"]:checked').inputValue()).toBe("MADE_UP");
+  await page.getByRole("button", { name: "Send report" }).click();
+  // Back on the report page, with the message.
+  await expect(page).toHaveURL(new RegExp(`/report\\?error=invalid_reason$`));
   await expect(page.getByRole("alert").filter({ hasText: "Choose what" })).toHaveText("Choose what is wrong with the advice.");
   expect(await reportsOf(ids.own)).toEqual([]);
   expect(await reportsOf(`qa-advrep-spam-0-${stamp}`)).toEqual([]);

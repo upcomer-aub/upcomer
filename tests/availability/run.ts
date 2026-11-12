@@ -399,10 +399,10 @@ async function main() {
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
     const editPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${own.get(users[0].id)}/edit`);
-    const feedPage = await users[0].client.get(`/courses/${courses[0].id}/advice`);
+    const reportPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${reportable}/report`);
     const world: World = {
       courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes"),
-        reportAdvice: actionIdFor(feedPage.body, "Send report") },
+        reportAdvice: actionIdFor(reportPage.body, "Send report") },
       advice: { stamp, hiddenAuthor: users[0].name, own, reportable },
     };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,

@@ -44,7 +44,8 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/courses/:courseId/materials` | Materials for that course |
 | `/courses/:courseId/exam` | The Upcomer Exam: every distinct question once, most likely first. Logged-in students can report a question under it, mark questions done and continue where they stopped (US-21), and switch to their personal order (US-28); optional `reported`, `report_error`, `progress_error`, `at`, and `order=personal` query parameters |
 | `/courses/:courseId/confidence` | Rate your confidence in each of the course's topics, 1 to 5 or Skip (US-24); requires a session. Optional `saved` and `error` query parameters |
-| `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter |
+| `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter. The viewer's own advice is marked "Your advice" with an "Edit or delete" link (US-36) |
+| `/courses/:courseId/advice/:adviceId/edit` | The author edits or deletes their own advice (US-36), at most 20 changes per student per minute; anyone else's advice is a 404. Requires a session |
 | `/courses/:courseId/questions` | The course's question bank, most frequent first; optional `q`, `year`, `termId`, `examType`, and `professorId` query parameters |
 | `/files/:fileId` | Original bytes for a stored file record |
 | `/admin/uploads` | Admin upload menu |
@@ -394,7 +395,7 @@ The service is `lib/question-corrections.ts` with messages in `lib/question-corr
 Students who took a course share advice with the students taking it now (epic E3). The `Advice` model in `prisma/schema.prisma` is shared by every advice story: publishing (US-34), resources (US-35), anonymity (US-37), the feed (US-38), editing and deleting (US-36), search (US-39), ratings and comments (US-40, US-41), reports (US-43), and moderation (US-77).
 
 - **Scope.** `scope` says what the advice is about: `COURSE` (no target), `EXAM` (a published exam paper, `fileId`), `SESSION` (a term such as "Fall 2024", `termId`), `TOPIC` (`topic`), or `QUESTION` (a question bank group, `questionGroupId`). Publishing (US-34) must check that the target belongs to the advice's course.
-- **Visibility.** Students only ever see `VISIBLE` advice of the course (`visibleCourseAdvice` in `lib/advice.ts`; use it in every student-facing advice query, for example search). `REMOVED` advice (deleted by its author or removed by an admin) is never shown. Advice whose target belongs to another course can only come from bad data and is left out entirely. Advice whose target was deleted, or whose exam paper is not published, is shown as course advice ("what it was about is no longer available") without naming the target.
+- **Visibility.** Students only ever see `VISIBLE` advice of the course (`visibleCourseAdvice` in `lib/advice.ts`; use it in every student-facing advice query, for example search). `REMOVED` advice (deleted by its author, `removedById` = the author, or removed by an admin) is never shown. Advice whose target belongs to another course can only come from bad data and is left out entirely. Advice whose target was deleted, or whose exam paper is not published, is shown as course advice ("what it was about is no longer available") without naming the target.
 - **Authors.** `authorId` is kept for anonymous advice too, so the author can edit it and admins can handle abuse. Student-facing views never show an anonymous author's name: `toAdviceItem` drops it before anything reaches a page, and no author ID is ever handed to a page. A deleted account shows as "Former student".
 - **Resources.** Only an `https` link is shown, opening in a new tab with `rel="noopener noreferrer nofollow"`; any other `resourceUrl` (for example `javascript:` or `http:`) is not shown.
 
@@ -407,6 +408,20 @@ Students who took a course share advice with the students taking it now (epic E3
 - **Availability.** `npm run availability` includes `GET /courses/:courseId/advice`, counted correct only when it shows the course's visible advice and neither removed advice, another course's advice, nor the anonymous author's name.
 
 The service is `lib/advice.ts` with display rules in `lib/advice-rules.ts`, the list is `components/advice-list.tsx`, and the page is `app/courses/[courseId]/advice/page.tsx`. Reading the feed prints `operation_timed` lines (`advice_feed`); a failed read logs `advice_feed_retrieval_failed`. Tests: `tests/unit/advice-rules.test.ts`, `tests/unit/advice.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-feed.test.ts`, and `tests/e2e/advice-feed.spec.ts`; the load test is `npm run load -- advice-feed`. Details and results: `ADVICE_FEED_REPORT.md`.
+
+### Editing and deleting one's own advice (US-36)
+
+In the feed, the viewer's own advice says "Your advice" (with "Others see you as Anonymous student" when it is anonymous) and links to `/courses/:courseId/advice/:adviceId/edit`. There the author changes the text (at most 2,000 characters, line breaks kept) and the resource link (a full `https://` address, or empty to remove it), or deletes the advice. Both end on the feed with the outcome ("Your advice was updated.", "Nothing was changed.", or "Your advice was deleted.").
+
+- **Only the author.** Every read and write matches the advice by its ID and the caller's user ID together (`lib/advice-changes.ts`), so anyone else's advice is "not found", exactly like advice that does not exist; nobody learns who wrote an anonymous advice by trying. This holds for a forged form too. Admins are not authors: removing advice is US-77.
+- **Deleting** marks the advice `REMOVED` with `removedById` set to the author, so it leaves every list and search at once but is kept for an open report (US-43) to be checked. Removed advice (by its author or an admin) cannot be edited or deleted again, so an edit can never bring it back; the write repeats the match, so an admin removal between the read and the write is not undone.
+- **Propagation.** Each change calls `invalidateCourseAdvice(courseId)`, so the feed shows it at once. Search (US-39) must read through `visibleCourseAdvice` and the current `body`, so edits and deletes reach it too.
+- **Which advice is the viewer's.** The cached feed page keeps the author IDs on the server, beside the items, and only compares them with the viewer's ID, so marking costs no extra database read and no author ID ever reaches a page.
+- **DoS protection.** At most `ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE` edits and deletes (default 20) per student per minute; past it the change is refused with "Too many changes in a minute" before the database is read, and `advice_change_rate_limited` is logged.
+- **Logs.** `advice_edited` and `advice_deleted` (info), `advice_change_refused` (warn, with the reason), and `advice_change_failed` (error), with IDs only, never the old or new text. Reads and writes are timed as `advice_own_read`, `advice_edit`, and `advice_delete`.
+- **Availability.** `npm run availability` opens and edits each user's own advice (`GET` and `POST .../edit`); an edit is correct only when it lands on the feed with "edited".
+
+The actions are `lib/advice-actions.ts` and the page is `app/courses/[courseId]/advice/[adviceId]/edit/page.tsx`. Tests: `tests/unit/advice-changes.test.ts`, `tests/unit/advice-actions.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-changes.test.ts`, and `tests/e2e/advice-changes.spec.ts`; the load test is `npm run load -- advice-edit`. Details and results: `ADVICE_CHANGES_REPORT.md`.
 
 ## Exam pipeline integration tests (US-92)
 
@@ -630,6 +645,10 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mustafa Ergaibi (Sprint 3) | `topic_confidence_save_failed` | error | `userId`, `courseId`, `errorType` |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_feed_retrieval_failed` | error | `courseId`, `errorType` (never advice text or an author's name) |
 | Mohammed Al-Haiqi (Sprint 4) | `advice_feed_rate_limited` | warn | `userId`, `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_edited`, `advice_deleted` | info | `adviceId`, `courseId`, `userId` (never the text) |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_change_refused` | warn | `adviceId`, `operation`, `reason`, `userId` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_change_rate_limited` | warn | `userId`, `operation`, `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_change_failed` | error | `adviceId`, `operation`, `userId`, `errorType` |
 
 ### What is never logged
 

@@ -16,7 +16,7 @@ import {
 
 // npm run availability: availability and reliability of every API as the number of concurrent users grows.
 // It builds and starts the production app, then runs a realistic mix of student requests (catalog search, course pages,
-// exam lists, question bank, ordered exam, student advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
+// exam lists, question bank, ordered exam, student advice, editing one's own advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
 // 50, and 100 users at once. Every request is recorded per API as available or not (timeout, connection error, 5xx, or an
 // unexpected status), correct or not, and how long it took. The report compares availability, error rates, latency
 // percentiles, throughput, timeouts, and error types across the user counts, with machine CPU, server memory, database
@@ -48,8 +48,13 @@ const PASSWORD = "availability-pass-123";
 
 type Course = { id: string; code: string };
 type User = { id: string; email: string; name: string; client: Client };
-// advice: the stamp in every advice body the run creates, and the name of the author of its anonymous advice.
-type World = { courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string }; advice: { stamp: string; hiddenAuthor: string } };
+// advice: the stamp in every advice body the run creates, the name of the author of its anonymous advice, and each user's
+// own (anonymous) advice in the first course, which they open and edit (US-36).
+type World = {
+  courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string; editAdvice: string };
+  advice: { stamp: string; hiddenAuthor: string; own: Map<string, string> };
+};
+let adviceEdits = 0;
 type Api = { name: string; weight: number; run(user: User, world: World, rng: Rng): Promise<{ reply: Reply; expected: number[]; correct: boolean }> };
 
 // The mix of requests, weighted like a student's visit: mostly reading, some logging in and adding courses.
@@ -89,6 +94,21 @@ const APIS: Api[] = [
     const correct = reply.body.includes(`${stamp} visible ${course.id}`) && reply.body.includes(`${stamp} anonymous ${course.id}`)
       && !reply.body.includes(`${stamp} removed`) && !reply.body.includes(hiddenAuthor) && (!other || !reply.body.includes(`${stamp} visible ${other.id}`));
     return { reply, expected: [200], correct };
+  } },
+  // US-36: correct only when the user's own advice is on the page, ready to edit.
+  { name: "GET /courses/:courseId/advice/:adviceId/edit (own advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    const reply = await user.client.get(`/courses/${course.id}/advice/${world.advice.own.get(user.id)}/edit`, TIMEOUT_MS);
+    return { reply, expected: [200], correct: reply.body.includes("Edit your advice") && reply.body.includes(`${world.advice.stamp} own ${user.id}`) };
+  } },
+  // US-36: every save has new text, so each one is a real write that invalidates the course's feed cache.
+  { name: "POST /courses/:courseId/advice/:adviceId/edit (edit own advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    const adviceId = world.advice.own.get(user.id)!;
+    const reply = await user.client.postAction(`/courses/${course.id}/advice/${adviceId}/edit`, world.actions.editAdvice, {
+      courseId: course.id, adviceId, body: `${world.advice.stamp} own ${user.id} version ${++adviceEdits}`, resourceUrl: "", page: "1",
+    }, TIMEOUT_MS);
+    return { reply, expected: [303], correct: reply.location === `/courses/${course.id}/advice?edited=1` };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
@@ -238,8 +258,9 @@ const portInUse = () => new Promise<boolean>(resolve => {
 function startServer(logFile: string) {
   const log = createWriteStream(logFile);
   const command = `${process.env.AVAILABILITY_SKIP_BUILD === "1" ? "" : "npm run build && "}npx next start --port ${PORT}`;
-  // Logs are not saved to the database during the run, so the run itself does not change what it measures.
-  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off" }, stdio: ["ignore", "pipe", "pipe"] });
+  // Logs are not saved to the database during the run, so the run itself does not change what it measures. Each user edits
+  // their advice more often than a person would, so the per-student change limit (DoS protection, US-36) is raised.
+  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);
   return server;
@@ -357,11 +378,18 @@ async function main() {
       { courseId: course.id, authorId: users[0].id, anonymous: true, body: `${stamp} anonymous ${course.id}` },
       { courseId: course.id, authorId: users[0].id, body: `${stamp} removed ${course.id}`, status: "REMOVED" as const, removedAt: new Date() },
     ]) });
+    // Each user's own advice to edit (US-36), anonymous so no user's name ever shows, and a day old so it sorts after the
+    // advice above on the first feed page.
+    const own = new Map(users.map(user => [user.id, `${stamp.toLowerCase()}-own-${user.id}`]));
+    await db.advice.createMany({ data: users.map(user => ({
+      id: own.get(user.id)!, courseId: courses[0].id, authorId: user.id, anonymous: true, body: `${stamp} own ${user.id}`, createdAt: new Date(Date.now() - 86_400_000),
+    })) });
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
+    const editPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${own.get(users[0].id)}/edit`);
     const world: World = {
-      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses") },
-      advice: { stamp, hiddenAuthor: users[0].name },
+      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes") },
+      advice: { stamp, hiddenAuthor: users[0].name, own },
     };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,
     // so every API is called twice before measuring.

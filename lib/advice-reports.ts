@@ -1,4 +1,5 @@
 import { AdviceReportStatus, AdviceStatus, type AdviceReportReason } from "@prisma/client";
+import { toAdviceItem, visibleCourseAdvice, type AdviceItem } from "@/lib/advice";
 import { isAdviceReportReason, MAX_ADVICE_REPORT_NOTE_LENGTH, type AdviceReportRefusal } from "@/lib/advice-report-rules";
 import { db } from "@/lib/db";
 import { logError } from "@/lib/logger";
@@ -69,6 +70,26 @@ export async function reportAdvice(userId: string, input: AdviceReportInput): Pr
     return { ok: false, error: "unexpected" };
   }
 }
+
+const reportableSelect = {
+  id: true, authorId: true, body: true, anonymous: true, scope: true, topic: true, resourceUrl: true, editedAt: true, createdAt: true,
+  author: { select: { name: true } },
+  file: { select: { id: true, title: true, category: true, status: true } },
+  term: { select: { name: true } },
+  questionGroup: { select: { id: true, text: true } },
+} as const;
+
+// For the report page: the advice as students see it, if it is shown in this course, with whether it is the student's own
+// and whether they already have an open report of it; null otherwise. The author's ID never leaves this function.
+export const getReportableAdvice = (userId: string, courseId: string, adviceId: string) => timed("advice_reportable_read", { adviceId, userId },
+  async (): Promise<{ advice: AdviceItem; own: boolean; reported: boolean } | null> => {
+    if (!adviceId || !courseId) return null;
+    const row = await db.advice.findFirst({ where: { ...visibleCourseAdvice(courseId), id: adviceId }, select: reportableSelect });
+    if (!row) return null;
+    const own = row.authorId === userId;
+    const reported = !own && (await db.adviceReport.count({ where: { adviceId, reporterId: userId, status: AdviceReportStatus.OPEN } })) > 0;
+    return { advice: toAdviceItem(row), own, reported };
+  });
 
 // Which of the given advice the student has an open report of, so the feed says "You reported this" instead of offering
 // the form again. One indexed query for a page of at most 20 advice.

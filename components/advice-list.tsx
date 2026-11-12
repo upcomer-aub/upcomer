@@ -2,7 +2,6 @@ import Link from "next/link";
 import type { FeedItem } from "@/lib/advice";
 import { adviceDate, ANONYMOUS_AUTHOR, SCOPE_PREFIX, type AdviceAbout as About } from "@/lib/advice-rules";
 import styles from "./advice-list.module.css";
-import { ReportAdviceForm } from "./report-advice";
 
 // One course's advice from previous students (US-38), newest first. Every item is labelled as student advice, so it is
 // never mistaken for the exam statistics of the Upcomer Exam. The author line comes ready from lib/advice.ts: an
@@ -45,7 +44,7 @@ export function AdviceList({ courseId, items, page = 1, reported = new Set() }: 
         </p>}
         {!item.mine && (reported.has(item.id)
           ? <p className="muted">You reported this advice. An admin will check it.</p>
-          : <ReportAdviceForm courseId={courseId} adviceId={item.id} page={page} />)}
+          : <p className={styles.report}><Link href={`/courses/${encodeURIComponent(courseId)}/advice/${encodeURIComponent(item.id)}/report${page > 1 ? `?page=${page}` : ""}`}>Report this advice</Link></p>)}
       </article>
     </li>)}
   </ol>;

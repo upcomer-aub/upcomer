@@ -26,3 +26,9 @@
 .own {
   font-size: 0.92rem;
 }
+
+/* The link to report other students' advice (US-43): quieter than the advice itself. */
+.report {
+  margin: 0.25rem 0 0;
+  font-size: 0.92rem;
+}

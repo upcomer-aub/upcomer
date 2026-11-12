@@ -44,6 +44,7 @@ The seed is repeatable and includes one record for a deliberately missing physic
 | `/courses/:courseId/materials` | Materials for that course |
 | `/courses/:courseId/exam` | The Upcomer Exam: every distinct question once, most likely first. Logged-in students can report a question under it, mark questions done and continue where they stopped (US-21), and switch to their personal order (US-28); optional `reported`, `report_error`, `progress_error`, `at`, and `order=personal` query parameters |
 | `/courses/:courseId/confidence` | Rate your confidence in each of the course's topics, 1 to 5 or Skip (US-24); requires a session. Optional `saved` and `error` query parameters |
+| `/courses/:courseId/advice` | Advice from previous students about the course (US-38), newest first, 20 per page, at most 120 reads per student per minute; requires a session. Optional `page` query parameter |
 | `/courses/:courseId/questions` | The course's question bank, most frequent first; optional `q`, `year`, `termId`, `examType`, and `professorId` query parameters |
 | `/files/:fileId` | Original bytes for a stored file record |
 | `/admin/uploads` | Admin upload menu |
@@ -388,6 +389,25 @@ Admins fix wrongly extracted or wrongly grouped questions so the frequency ranki
 
 The service is `lib/question-corrections.ts` with messages in `lib/question-correction-rules.ts`, the actions (`requireAdmin()` first) are `lib/question-correction-actions.ts`, and the pages are under `app/admin/questions/[courseId]/`. Tests: `tests/unit/question-corrections-grouping.test.ts`, `tests/unit/question-corrections.test.ts`, `tests/unit/question-correction-pages.test.tsx`, `tests/integration/question-corrections.test.ts`, and `tests/e2e/admin-question-corrections.spec.ts`; the load test is `npm run load -- question-corrections`. Details and results: `QUESTION_CORRECTIONS_REPORT.md`.
 
+## Advice from previous students (Sprint 4)
+
+Students who took a course share advice with the students taking it now (epic E3). The `Advice` model in `prisma/schema.prisma` is shared by every advice story: publishing (US-34), resources (US-35), anonymity (US-37), the feed (US-38), editing and deleting (US-36), search (US-39), ratings and comments (US-40, US-41), reports (US-43), and moderation (US-77).
+
+- **Scope.** `scope` says what the advice is about: `COURSE` (no target), `EXAM` (a published exam paper, `fileId`), `SESSION` (a term such as "Fall 2024", `termId`), `TOPIC` (`topic`), or `QUESTION` (a question bank group, `questionGroupId`). Publishing (US-34) must check that the target belongs to the advice's course.
+- **Visibility.** Students only ever see `VISIBLE` advice of the course (`visibleCourseAdvice` in `lib/advice.ts`; use it in every student-facing advice query, for example search). `REMOVED` advice (deleted by its author or removed by an admin) is never shown. Advice whose target belongs to another course can only come from bad data and is left out entirely. Advice whose target was deleted, or whose exam paper is not published, is shown as course advice ("what it was about is no longer available") without naming the target.
+- **Authors.** `authorId` is kept for anonymous advice too, so the author can edit it and admins can handle abuse. Student-facing views never show an anonymous author's name: `toAdviceItem` drops it before anything reaches a page, and no author ID is ever handed to a page. A deleted account shows as "Former student".
+- **Resources.** Only an `https` link is shown, opening in a new tab with `rel="noopener noreferrer nofollow"`; any other `resourceUrl` (for example `javascript:` or `http:`) is not shown.
+
+### Course advice feed (US-38)
+
+`/courses/:courseId/advice` (linked from the course page as "Student Advice") lists the course's visible advice, newest first, 20 per page (`?page=`; an invalid or out-of-range page shows the first or last page). Each item is labelled "Student advice" and shows what it is about, the text (as text, line breaks kept), the resource, the author or "Anonymous student", the date, and "edited". Advice is other students' writing, so the page needs a session. There is no publishing form yet; that is US-34.
+
+- **Caching.** A feed page is the same for every viewer, so it is kept in memory for `ADVICE_FEED_CACHE_SECONDS` (default 30; `0` turns it off), at most 50 pages per course and 500 courses. **Every code path that writes advice must call `invalidateCourseAdvice(courseId)` after its write**, so changes and removals show at once; the time limit only bounds writes made outside the app. Cached reads are timed as `advice_feed_cached`, database reads as `advice_feed`.
+- **DoS protection.** At most `ADVICE_FEED_RATE_LIMIT_PER_MINUTE` feed reads (default 120) per student per minute; past it, the page says "Too many pages opened in a minute" without reading the database, and `advice_feed_rate_limited` is logged with the student's ID. Like the other limits and the cache, it lives in one server's memory.
+- **Availability.** `npm run availability` includes `GET /courses/:courseId/advice`, counted correct only when it shows the course's visible advice and neither removed advice, another course's advice, nor the anonymous author's name.
+
+The service is `lib/advice.ts` with display rules in `lib/advice-rules.ts`, the list is `components/advice-list.tsx`, and the page is `app/courses/[courseId]/advice/page.tsx`. Reading the feed prints `operation_timed` lines (`advice_feed`); a failed read logs `advice_feed_retrieval_failed`. Tests: `tests/unit/advice-rules.test.ts`, `tests/unit/advice.test.ts`, `tests/unit/advice-pages.test.tsx`, `tests/integration/advice-feed.test.ts`, and `tests/e2e/advice-feed.spec.ts`; the load test is `npm run load -- advice-feed`. Details and results: `ADVICE_FEED_REPORT.md`.
+
 ## Exam pipeline integration tests (US-92)
 
 `tests/integration/exam-pipeline.test.ts` runs the exam pipeline end to end against a real database: five sample exam PDFs (built in `tests/integration/fixtures/sample-exams.ts`) are uploaded through `POST /api/admin/uploads`, their questions extracted, grouped and ranked by `rebuildQuestionBank`, and the result checked against the expected consolidated ordered exam (`getConsolidatedExam`), question by question, with counts, tiers, and papers. Other tests cover upload order, concurrent uploads, pending and rejected submissions, materials, deleted and re-tagged papers, non-admin uploads, and a 20-paper course within 1 s per stage. They run in CI with `npm run test:integration`.
@@ -608,6 +628,8 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mustafa Ergaibi (Sprint 3) | `topic_confidence_saved` | info | `userId`, `courseId`, `ratedTopics`, `skippedTopics`, `unchangedTopics` (never a topic) |
 | Mustafa Ergaibi (Sprint 3) | `topic_confidence_refused`, `topic_confidence_rate_limited` | warn | `userId`, `courseId`, `reason` (`unknown_topic`, `invalid_rating`, `no_ratings`), `retryAfterSeconds` |
 | Mustafa Ergaibi (Sprint 3) | `topic_confidence_save_failed` | error | `userId`, `courseId`, `errorType` |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_feed_retrieval_failed` | error | `courseId`, `errorType` (never advice text or an author's name) |
+| Mohammed Al-Haiqi (Sprint 4) | `advice_feed_rate_limited` | warn | `userId`, `retryAfterSeconds` |
 
 ### What is never logged
 

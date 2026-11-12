@@ -1,0 +1,19 @@
+.feed {
+  padding: 0;
+  list-style: none;
+}
+
+.advice > p {
+  margin: 0.25rem 0;
+}
+
+.about {
+  font-weight: 600;
+}
+
+/* Keep the author's line breaks; long words and links wrap instead of widening the page. */
+.body,
+.resource {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

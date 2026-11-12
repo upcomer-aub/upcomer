@@ -16,7 +16,7 @@ import {
 
 // npm run availability: availability and reliability of every API as the number of concurrent users grows.
 // It builds and starts the production app, then runs a realistic mix of student requests (catalog search, course pages,
-// exam lists, question bank, ordered exam, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
+// exam lists, question bank, ordered exam, student advice, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
 // 50, and 100 users at once. Every request is recorded per API as available or not (timeout, connection error, 5xx, or an
 // unexpected status), correct or not, and how long it took. The report compares availability, error rates, latency
 // percentiles, throughput, timeouts, and error types across the user counts, with machine CPU, server memory, database
@@ -48,7 +48,8 @@ const PASSWORD = "availability-pass-123";
 
 type Course = { id: string; code: string };
 type User = { id: string; email: string; name: string; client: Client };
-type World = { courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string } };
+// advice: the stamp in every advice body the run creates, and the name of the author of its anonymous advice.
+type World = { courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string }; advice: { stamp: string; hiddenAuthor: string } };
 type Api = { name: string; weight: number; run(user: User, world: World, rng: Rng): Promise<{ reply: Reply; expected: number[]; correct: boolean }> };
 
 // The mix of requests, weighted like a student's visit: mostly reading, some logging in and adding courses.
@@ -77,6 +78,17 @@ const APIS: Api[] = [
     const course = rng.pick(world.courses);
     const reply = await user.client.get(`/courses/${course.id}/exam`, TIMEOUT_MS);
     return { reply, expected: [200], correct: reply.body.includes("Upcomer Exam") && reply.body.includes(course.code) };
+  } },
+  // US-38: correct only when the page shows this course's visible advice, and neither the removed advice, another course's
+  // advice, nor the name of the anonymous author.
+  { name: "GET /courses/:courseId/advice", weight: 10, async run(user, world, rng) {
+    const course = rng.pick(world.courses);
+    const other = world.courses.find(item => item.id !== course.id);
+    const reply = await user.client.get(`/courses/${course.id}/advice`, TIMEOUT_MS);
+    const { stamp, hiddenAuthor } = world.advice;
+    const correct = reply.body.includes(`${stamp} visible ${course.id}`) && reply.body.includes(`${stamp} anonymous ${course.id}`)
+      && !reply.body.includes(`${stamp} removed`) && !reply.body.includes(hiddenAuthor) && (!other || !reply.body.includes(`${stamp} visible ${other.id}`));
+    return { reply, expected: [200], correct };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
@@ -338,9 +350,19 @@ async function main() {
       .filter(file => existsSync(path.join(storageRoot(), file.storageKey))).map(file => file.id);
     if (!courses.length || !files.length) throw new Error("No courses with files. Run npm run db:seed first.");
     const users = await createUsers(db, stamp, Math.max(...STAGES));
+    // Advice in every course (US-38): one without an author account, one anonymous by the first user (whose name must never
+    // show), and one removed. Only the anonymous advice is by the first user, so their name on the page is always a leak.
+    await db.advice.createMany({ data: courses.flatMap(course => [
+      { courseId: course.id, authorId: null, body: `${stamp} visible ${course.id}` },
+      { courseId: course.id, authorId: users[0].id, anonymous: true, body: `${stamp} anonymous ${course.id}` },
+      { courseId: course.id, authorId: users[0].id, body: `${stamp} removed ${course.id}`, status: "REMOVED" as const, removedAt: new Date() },
+    ]) });
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
-    const world: World = { courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses") } };
+    const world: World = {
+      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses") },
+      advice: { stamp, hiddenAuthor: users[0].name },
+    };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,
     // so every API is called twice before measuring.
     const warmUp = createRng(SEED);
@@ -359,6 +381,8 @@ async function main() {
     console.log(`Supported concurrent users: ${supported}. Report: ${base}.md`);
   } finally {
     stopServer(server);
+    // The advice is in the seeded courses, so it is deleted by its stamp (deleting the users would only clear its author).
+    await db.advice.deleteMany({ where: { body: { startsWith: `${stamp} ` } } });
     await cleanUp(db, stamp, { uploadedFileIds: [], since });
     await db.$disconnect();
   }

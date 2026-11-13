@@ -1,0 +1,34 @@
+.feed {
+  padding: 0;
+  list-style: none;
+}
+
+.advice > p {
+  margin: 0.25rem 0;
+}
+
+.about {
+  font-weight: 600;
+}
+
+/* Keep the author's line breaks; long words and links wrap instead of widening the page. */
+.body,
+.resource {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* The viewer's own advice (US-36). */
+.mine {
+  color: var(--primary);
+}
+
+.own {
+  font-size: 0.92rem;
+}
+
+/* The link to report other students' advice (US-43): quieter than the advice itself. */
+.report {
+  margin: 0.25rem 0 0;
+  font-size: 0.92rem;
+}

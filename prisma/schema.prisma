@@ -30,6 +30,7 @@ model Term {
   id        String       @id @default(cuid())
   name      String       @unique
   files     CourseFile[]
+  advice    Advice[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 }
@@ -60,6 +61,11 @@ model User {
   closedReports       QuestionReport[]     @relation("ClosedQuestionReports")
   learningTopics      LearningTopic[]
   questionProgress    QuestionProgress[]
+
+  advice              Advice[]             @relation("AdviceAuthor")
+  removedAdvice       Advice[]             @relation("AdviceRemovedBy")
+  adviceReports       AdviceReport[]       @relation("AdviceReporter")
+  closedAdviceReports AdviceReport[]       @relation("AdviceReportClosedBy")
 
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -120,6 +126,8 @@ model Course {
   questionReports  QuestionReport[]
   learningTopics   LearningTopic[]
   questionProgress QuestionProgress[]
+  advice           Advice[]
+  adviceReports    AdviceReport[]
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
@@ -181,6 +189,7 @@ model CourseFile {
   reviewedAt       DateTime?
   questions        Question[]
   processingRuns   FileProcessingRun[]
+  advice           Advice[]
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
@@ -306,6 +315,7 @@ model QuestionGroup {
   questions      Question[]
   reports        QuestionReport[]
   progress       QuestionProgress[]
+  advice         Advice[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
@@ -405,4 +415,113 @@ model QuestionProgress {
   @@unique([userId, groupId])
   @@index([userId, courseId])
   @@index([groupId])
+}
+
+// What a piece of advice is about (E3). COURSE needs no target; each other scope names one target of the same course:
+// EXAM a published exam paper (fileId), SESSION a term such as "Fall 2024" (termId), TOPIC a topic (topic), and QUESTION a
+// question of the question bank (questionGroupId). Publishing (US-34) checks the target; see lib/advice.ts for how the
+// feed (US-38) shows advice whose target is gone.
+enum AdviceScope {
+  COURSE
+  EXAM
+  SESSION
+  TOPIC
+  QUESTION
+}
+
+// REMOVED advice (deleted by its author, US-36, or removed by an admin, US-77) is never shown to students, in any list
+// or search.
+enum AdviceStatus {
+  VISIBLE
+  REMOVED
+}
+
+// Advice from a previous student about one course (E3: US-34 to US-43, US-77). The author is kept for anonymous advice
+// too, so they can edit it and admins can handle abuse, but student-facing views never show it; see lib/advice.ts.
+// The text and the author's name are never logged.
+model Advice {
+  id              String         @id @default(cuid())
+  courseId        String
+  course          Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Null if the author's account was deleted; the advice then shows no author.
+  authorId        String?
+  author          User?          @relation("AdviceAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  // Hides the author in every student-facing view (US-37).
+  anonymous       Boolean        @default(false)
+  body            String
+  scope           AdviceScope    @default(COURSE)
+  // The scope's target; null for COURSE, or once the target was deleted.
+  fileId          String?
+  file            CourseFile?    @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  termId          String?
+  term            Term?          @relation(fields: [termId], references: [id], onDelete: SetNull)
+  topic           String?
+  questionGroupId String?
+  questionGroup   QuestionGroup? @relation(fields: [questionGroupId], references: [id], onDelete: SetNull)
+  // An optional external resource (US-35); only https links are shown.
+  resourceUrl     String?
+  status          AdviceStatus   @default(VISIBLE)
+  // Set when the author last edited the advice (US-36).
+  editedAt        DateTime?
+  // Set when the advice was removed, by its author (US-36) or an admin (US-77).
+  removedAt       DateTime?
+  removedById     String?
+  removedBy       User?          @relation("AdviceRemovedBy", fields: [removedById], references: [id], onDelete: SetNull)
+  reports         AdviceReport[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([courseId, status, createdAt])
+  @@index([authorId])
+  @@index([fileId])
+  @@index([termId])
+  @@index([questionGroupId])
+}
+
+// What a student says is wrong with a piece of advice (US-43).
+enum AdviceReportReason {
+  // Insulting, harassing, or hateful.
+  OFFENSIVE
+  // Advertising, or not about the course.
+  SPAM
+  // Names or details of a person who did not agree to it.
+  PERSONAL_INFO
+  // Encourages cheating or breaking course rules.
+  ACADEMIC_DISHONESTY
+  OTHER
+}
+
+// OPEN reports wait for an admin (US-77). RESOLVED means the admin removed the advice; DISMISSED that they kept it.
+enum AdviceReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+// One student's report of one piece of advice (US-43). A student cannot open a second report of the same advice while
+// their first is open (see lib/advice-reports.ts). Only admins see reports; the reporter is never shown to the author or
+// to other students. The row is kept after the advice is removed, so the admin's decision stays on record.
+model AdviceReport {
+  id         String             @id @default(cuid())
+  adviceId   String
+  advice     Advice             @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Null if the student's account was deleted.
+  reporterId String?
+  reporter   User?              @relation("AdviceReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     AdviceReportReason
+  // Optional details from the student, at most 500 characters; shown to admins, never logged.
+  note       String?
+  status     AdviceReportStatus @default(OPEN)
+  closedAt   DateTime?
+  closedById String?
+  closedBy   User?              @relation("AdviceReportClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@index([status, createdAt])
+  @@index([adviceId, status])
+  @@index([reporterId, status])
+  @@index([courseId])
 }

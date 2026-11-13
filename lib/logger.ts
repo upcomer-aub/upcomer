@@ -82,7 +82,18 @@ type LogEvent =
   | "topic_confidence_saved"
   | "topic_confidence_refused"
   | "topic_confidence_rate_limited"
-  | "topic_confidence_save_failed";
+  | "topic_confidence_save_failed"
+  | "advice_feed_retrieval_failed"
+  | "advice_feed_rate_limited"
+  | "advice_edited"
+  | "advice_deleted"
+  | "advice_change_refused"
+  | "advice_change_rate_limited"
+  | "advice_change_failed"
+  | "advice_report_submitted"
+  | "advice_report_refused"
+  | "advice_report_rate_limited"
+  | "advice_report_failed";
 
 
 export type { LogEvent };
@@ -195,6 +206,22 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   topic_confidence_refused: "warn",
   topic_confidence_rate_limited: "warn",
   topic_confidence_save_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): advice feed (US-38). IDs, retry times, and error types only; advice text and author names are never logged.
+  advice_feed_retrieval_failed: "error",
+  advice_feed_rate_limited: "warn",
+  // Mohammed Al-Haiqi (Sprint 4): editing and deleting one's own advice (US-36). IDs, the operation, refusal reasons, and
+  // error types only; the old and new text are never logged.
+  advice_edited: "info",
+  advice_deleted: "info",
+  advice_change_refused: "warn",
+  advice_change_rate_limited: "warn",
+  advice_change_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): reporting advice (US-43). IDs, the reason category, and refusal reasons only; the note
+  // and the advice text are never logged.
+  advice_report_submitted: "info",
+  advice_report_refused: "warn",
+  advice_report_rate_limited: "warn",
+  advice_report_failed: "error",
 
 };
 

@@ -8,6 +8,7 @@ import {
   cleanAnswer, MOCK_ANSWER_MAX_LENGTH, parseMockExamConfig, selectMockQuestions, sourceQuestionOf,
   type GeneratedCandidate, type MockExamError, type MockExamOptions, type PoolQuestion, type SittingError,
 } from "@/lib/mock-exam-rules";
+import { excludedIds, type AvoidSet } from "@/lib/mock-exam-version-rules";
 import { getGeneratedPracticeQuestions } from "@/lib/practice-generation";
 import { courseExams } from "@/lib/question-bank";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
@@ -76,10 +77,15 @@ export type CreateMockExamResult = { ok: true; id: string; difficultyApplied: bo
 
 const paperLabel = (paper: { title: string; year: number | null }) => (paper.year ? `${paper.title} (${paper.year})` : paper.title);
 
+// US-46 (Lea Tass): an alternative version passes the original exam's ID and the questions its family already used.
+export type VersionOf = { originalId: string; avoid: AvoidSet };
+
 // Generates a mock exam for the given student. The exam has exactly the length asked for, only questions of the chosen
 // topics, and the chosen difficulty; if the course cannot give that, nothing is saved and the error says how many questions match.
+// With `version` (US-46) the questions already used by the exam's versions are left out (selectMockQuestions' `exclude`),
+// and the new exam is linked to the original; without it, nothing changes.
 // The per-hour limit counts exams that are made: a refused attempt (too few questions, an unknown topic) does not use it up.
-export async function createMockExam(userId: string, input: CreateMockExamInput): Promise<CreateMockExamResult> {
+export async function createMockExam(userId: string, input: CreateMockExamInput, version?: VersionOf): Promise<CreateMockExamResult> {
   const context = { userId, courseId: input.courseId.slice(0, 100) || undefined };
   const refuse = (error: MockExamError, available?: number): CreateMockExamResult => {
     logError("mock_exam_refused", { ...context, reason: error });
@@ -94,7 +100,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
     const pool = await buildPool(course.id);
     if (!pool.length) return refuse("no_questions");
     const generated = config.includeGenerated ? await generatedCandidates(userId, course.id) : [];
-    const selected = selectMockQuestions(pool, config, { generated });
+    const selected = selectMockQuestions(pool, config, { generated, ...(version ? { exclude: excludedIds(pool, generated, version.avoid) } : {}) });
     if (!selected.ok) return refuse(selected.error, selected.available);
     const limit = checkRateLimit(`mock-exam:${userId}`, mockExamLimit(), MOCK_EXAM_RATE_WINDOW_MS);
     if (!limit.ok) {
@@ -111,6 +117,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
       data: {
         userId, courseId: course.id, topicKeys: config.topicKeys, topics: config.topicKeys.map(key => labels.get(key) ?? key),
         length: config.length, difficulty: MockExamDifficulty[config.difficulty], includeGenerated: config.includeGenerated === true,
+        ...(version ? { originalId: version.originalId } : {}),
         questions: {
           create: [
             ...selected.questions.map((question, index) => ({
@@ -130,7 +137,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
     });
     logError("mock_exam_created", {
       ...context, mockExamId: created.id, difficulty: config.difficulty, length: String(config.length), topicCount: String(config.topicKeys.length),
-      generatedCount: String(selected.generated.length),
+      generatedCount: String(selected.generated.length), ...(version ? { originalId: version.originalId } : {}),
     });
     return { ok: true, id: created.id, difficultyApplied: selected.narrowed || config.difficulty === "MIXED" };
   } catch (error) {

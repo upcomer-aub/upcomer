@@ -115,7 +115,23 @@ type LogEvent =
   | "mock_exam_saved"
   | "mock_exam_submitted"
   | "mock_exam_save_refused"
-  | "mock_exam_save_failed";
+  | "mock_exam_save_failed"
+  | "practice_set_failed"
+  | "advice_vote_saved"
+  | "advice_vote_refused"
+  | "advice_vote_rate_limited"
+  | "advice_vote_failed"
+  | "advice_vote_retrieval_failed"
+  | "advice_comment_saved"
+  | "advice_comment_refused"
+  | "advice_comment_rate_limited"
+  | "advice_comment_deleted"
+  | "advice_comment_delete_refused"
+  | "advice_comment_failed"
+  | "advice_comment_retrieval_failed"
+  | "mock_exam_version_created"
+  | "mock_exam_version_refused"
+  | "mock_exam_version_failed";
 
 
 export type { LogEvent };
@@ -269,6 +285,27 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   mock_exam_submitted: "info",
   mock_exam_save_refused: "warn",
   mock_exam_save_failed: "error",
+  // Lea Tass (Sprint 4): practice sets that emphasize weak topics (US-31). IDs, the size, and the error type only; topics are never logged.
+  practice_set_failed: "error",
+  // Lea Tass (Sprint 4): helpful marks on advice (US-40). IDs, the new state, reason codes, and error types only.
+  advice_vote_saved: "info",
+  advice_vote_refused: "warn",
+  advice_vote_rate_limited: "warn",
+  advice_vote_failed: "error",
+  advice_vote_retrieval_failed: "error",
+  // Lea Tass (Sprint 4): replies beneath advice (US-41). IDs, reason codes, and error types only; reply text is never logged.
+  advice_comment_saved: "info",
+  advice_comment_refused: "warn",
+  advice_comment_rate_limited: "warn",
+  advice_comment_deleted: "info",
+  advice_comment_delete_refused: "warn",
+  advice_comment_failed: "error",
+  advice_comment_retrieval_failed: "error",
+  // Lea Tass (Sprint 4): alternative versions of a mock exam (US-46). IDs, the version number, reason codes, the count of
+  // unused questions, and error types only; question text is never logged.
+  mock_exam_version_created: "info",
+  mock_exam_version_refused: "warn",
+  mock_exam_version_failed: "error",
 
 };
 

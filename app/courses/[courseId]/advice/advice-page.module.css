@@ -1,0 +1,4 @@
+/* The search row has four selects since US-40 (sort). The shared .search rule gives each select a 12rem basis, which pushed
+   the Search button onto its own line at desktop width. A 9rem basis keeps the four selects and the button on one line;
+   narrow screens still wrap to two selects per line. Only this page's search form uses it. */
+.filters select { flex-basis: 9rem; }

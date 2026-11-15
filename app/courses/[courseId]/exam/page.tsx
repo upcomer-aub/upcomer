@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ConsolidatedExamView, PersonalExamView } from "@/components/consolidated-exam";
 import { OrderSwitch } from "@/components/order-switch";
 import { ProgressSummary } from "@/components/question-progress";
+import { SourceLabel } from "@/components/source-label";
 import { getCurrentUser } from "@/lib/auth";
 import { getConsolidatedExam } from "@/lib/consolidated-exam";
 import { getCourseById } from "@/lib/courses";
@@ -41,6 +42,7 @@ export default async function ConsolidatedExamPage({ params, searchParams }: {
   const rateTopics = <Link href={`/courses/${courseId}/confidence`}>Rate your topics</Link>;
   const noProfile = Boolean(personalOrder && !personalOrder.hasProfile);
   return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Upcomer Exam</h1>
+    <SourceLabel kind="statistics">Tips are on the <Link href={`/courses/${courseId}/advice`}>Advice</Link> page (student opinion).</SourceLabel>
     <ReportNotice reported={reported} error={reportError} />
     {progressError && <p className="notice error" role="alert">{progressMessage(progressError)}</p>}
     {exam.totalPapers === 0
@@ -51,6 +53,7 @@ export default async function ConsolidatedExamPage({ params, searchParams }: {
           <p className="muted">{exam.questions.length} distinct {exam.questions.length === 1 ? "question" : "questions"} from {papers}, {personalOrder?.hasProfile ? "in your personal order" : "the most likely first"}. Each question is listed once.</p>
           {done && <OrderSwitch route={route} personal={personal} />}
           {done && <p><Link href={`/courses/${courseId}/practice`}>Practice questions and update your profile</Link></p>}
+          {done && <p className="muted"><Link href={`/courses/${courseId}/practice/weak-topics`}>Practice your weak topics</Link> with a shorter set of these questions.</p>}
           {done && !noProfile && <p className="muted">{rateTopics} to change your personal order.</p>}
           {done && <p className="muted"><Link href={`/courses/${courseId}/topics`}>See your strongest and weakest topics</Link></p>}
           {noProfile && <p className="muted" role="note">You have no learning profile for this course yet, so this is the frequency order. {rateTopics} to get a personal order.</p>}

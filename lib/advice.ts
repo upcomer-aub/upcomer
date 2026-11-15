@@ -3,6 +3,7 @@ import {
   ADVICE_BODY_MAX_LENGTH, ADVICE_LINK_TITLE_MAX_LENGTH, ADVICE_QUERY_MAX_LENGTH, ADVICE_TITLE_MAX_LENGTH, ANONYMOUS_AUTHOR_LABEL,
   cleanAdviceBody, collapseSpaces, FORMER_STUDENT_LABEL, isScopeName, parseResourceLink, topicKeyOf, type AdviceError, type AdviceScopeName,
 } from "@/lib/advice-rules";
+import type { AdviceSort } from "@/lib/advice-vote-rules";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { errorCode, logError } from "@/lib/logger";
@@ -148,7 +149,8 @@ export function toPublicAdvice(row: AdviceRow, viewerId: string | null): PublicA
   };
 }
 
-export type AdviceFilters = { query?: string; topic?: string; examId?: string; termId?: string; page?: number };
+// sort (US-40): "helpful" lists the most helpful first (ties: newest, then ID); anything else keeps newest first.
+export type AdviceFilters = { query?: string; topic?: string; examId?: string; termId?: string; page?: number; sort?: AdviceSort };
 export type AdvicePage = { items: PublicAdvice[]; total: number; page: number; totalPages: number };
 
 // The visible advice of ONE course, newest first (US-39). With no filters it is the course's whole feed (US-38 can use it).
@@ -173,7 +175,8 @@ export async function searchAdvice(courseId: string, viewerId: string | null, fi
     const requested = filters.page ?? 1;
     const page = Number.isInteger(requested) && requested > 0 ? Math.min(requested, totalPages) : 1;
     const rows = await db.advice.findMany({
-      where, select: adviceSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * ADVICE_PAGE_SIZE, take: ADVICE_PAGE_SIZE,
+      where, select: adviceSelect,
+      orderBy: [...(filters.sort === "helpful" ? [{ votes: { _count: "desc" as const } }] : []), { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * ADVICE_PAGE_SIZE, take: ADVICE_PAGE_SIZE,
     });
     return { items: rows.map(row => toPublicAdvice(row, viewerId)), total, page, totalPages };
   } catch (error) {

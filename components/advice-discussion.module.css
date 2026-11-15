@@ -1,0 +1,10 @@
+/* US-41: the discussion beneath an advice post. Theme tokens only, so light and dark mode both work. */
+.discussion { margin-top: .75rem; border-top: 1px solid var(--border); padding-top: .6rem; }
+.discussion > summary { cursor: pointer; font-weight: 600; }
+.replies { margin: .6rem 0 0; padding: 0; list-style: none; display: grid; gap: .6rem; }
+.reply { border-left: 2px solid var(--border); padding-left: .75rem; }
+.meta { margin: 0; overflow-wrap: anywhere; }
+.body { margin: .2rem 0 .3rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.delete { border: 0; background: none; padding: 0; color: var(--link); font: inherit; font-size: .9rem; text-decoration: underline; cursor: pointer; }
+.form { margin: .9rem 0 .25rem; }
+.form textarea { width: 100%; }

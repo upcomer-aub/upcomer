@@ -12,6 +12,7 @@ vi.mock("next/navigation", () => ({ notFound: mocks.notFound }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
 vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: mocks.allowAdviceFeedRead }));
+vi.mock("@/lib/advice-changes", () => ({ adviceChangeMessage: (error: string) => `message for ${error}` }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => <form data-advice-form="true" /> }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 
@@ -21,7 +22,7 @@ const render = (query: Record<string, string> = {}) =>
 const advice = (over: Partial<PublicAdvice> = {}): PublicAdvice => ({
   id: "a1", courseId: course.id, title: "Start the labs early", body: "They take long.", resourceUrl: null, resourceTitle: null,
   scope: { kind: "EXAM", label: "Final 2024", fileId: "f1", termId: null, groupId: null, topic: null },
-  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, createdAt: new Date("2026-11-01T00:00:00Z"), ...over,
+  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, edited: false, createdAt: new Date("2026-11-01T00:00:00Z"), ...over,
 });
 
 beforeEach(() => {

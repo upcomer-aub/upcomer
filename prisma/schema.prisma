@@ -507,6 +507,8 @@ model Advice {
   removedAt     DateTime?
   removedById   String?
   removedBy     User?           @relation("AdviceRemoved", fields: [removedById], references: [id], onDelete: SetNull)
+  // Set when the author last edited the title, text, or link (US-36).
+  editedAt      DateTime?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 

@@ -20,7 +20,7 @@ import {
 
 const row = (id: string, over: Partial<AdviceRow> = {}): AdviceRow => ({
   id, courseId: "course-1", authorId: "author-1", isAnonymous: false, scopeKind: "COURSE", scopeLabel: "CS101",
-  fileId: null, termId: null, groupId: null, topic: null, title: `Title ${id}`, body: "Body", resourceUrl: null, resourceTitle: null,
+  fileId: null, termId: null, groupId: null, topic: null, title: `Title ${id}`, body: "Body", resourceUrl: null, resourceTitle: null, editedAt: null,
   createdAt: new Date("2026-11-02T10:00:00Z"), author: { name: "Named Author" }, ...over,
 });
 

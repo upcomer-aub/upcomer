@@ -22,7 +22,7 @@ const input = (over: Partial<PublishInput> = {}): PublishInput => ({
 
 const row = (over: Partial<AdviceRow> = {}): AdviceRow => ({
   id: "advice-1", courseId: COURSE.id, authorId: "author-secret-id", isAnonymous: false, scopeKind: "COURSE", scopeLabel: "CS101",
-  fileId: null, termId: null, groupId: null, topic: null, title: "Title", body: "Body", resourceUrl: null, resourceTitle: null,
+  fileId: null, termId: null, groupId: null, topic: null, title: "Title", body: "Body", resourceUrl: null, resourceTitle: null, editedAt: null,
   createdAt: new Date("2026-11-02T10:00:00Z"), author: { name: "Real Author Name" }, ...over,
 });
 

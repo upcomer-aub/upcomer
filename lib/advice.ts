@@ -118,7 +118,7 @@ export async function publishAdvice(userId: string, input: PublishInput): Promis
 
 const adviceSelect = {
   id: true, courseId: true, authorId: true, isAnonymous: true, scopeKind: true, scopeLabel: true, fileId: true, termId: true, groupId: true,
-  topic: true, title: true, body: true, resourceUrl: true, resourceTitle: true, createdAt: true,
+  topic: true, title: true, body: true, resourceUrl: true, resourceTitle: true, editedAt: true, createdAt: true,
   author: { select: { name: true } },
 } satisfies Prisma.AdviceSelect;
 export type AdviceRow = Prisma.AdviceGetPayload<{ select: typeof adviceSelect }>;
@@ -136,6 +136,8 @@ export type PublicAdvice = {
   authorLabel: string;
   isAnonymous: boolean;
   isMine: boolean;
+  // The author edited it after publishing (US-36).
+  edited: boolean;
   createdAt: Date;
 };
 
@@ -146,6 +148,7 @@ export function toPublicAdvice(row: AdviceRow, viewerId: string | null): PublicA
     authorLabel: row.isAnonymous ? ANONYMOUS_AUTHOR_LABEL : (row.author?.name ?? FORMER_STUDENT_LABEL),
     isAnonymous: row.isAnonymous,
     isMine: viewerId !== null && row.authorId === viewerId,
+    edited: row.editedAt !== null,
     createdAt: row.createdAt,
   };
 }

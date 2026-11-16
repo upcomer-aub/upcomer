@@ -444,3 +444,392 @@ The feed is the advice page at `/courses/:courseId/advice` with no search or fil
 - **Stored-request cleanup:** not applicable; the feed stores nothing per request.
 - **Tests:** `tests/unit/advice-feed.test.ts`, `tests/unit/advice-feed-page.test.tsx`, `tests/integration/advice-feed.test.ts`, `tests/e2e/advice-feed.spec.ts`, the feed in `npm run availability` (with a correctness check), and `npm run load -- advice-feed`. Details and results: `ADVICE_FEED_REPORT.md`.
 - **Shared files changed:** `lib/advice.ts` (the guard, the cache, the limit; `searchAdvice` keeps its signature), `app/courses/[courseId]/advice/page.tsx` (the limit check), `tests/unit/advice.test.ts` (one line: reset the cache between tests), `lib/logger.ts` (one event), `tests/availability/run.ts`, `.env.example`, and `README.md`.
+
+
+### Editing and deleting one's own advice (US-36, Mohammed Al-Haiqi, Sprint 4)
+
+After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One migration is new: `20261116000002_advice_edited` (one nullable column, `Advice.editedAt`).
+
+- **Only the author.** Each of the author's posts on `/courses/:courseId/advice` has "Edit or delete your advice" (from `PublicAdvice.isMine`), which opens `/courses/:courseId/advice/:adviceId/edit`. Every read and write in `lib/advice-changes.ts` matches the advice by its ID, the session user as author, and `VISIBLE` together, so another student's advice, an admin's attempt, advice of another course, and advice that does not exist are all the same "not found" (nobody learns who wrote an anonymous post by trying).
+- **Editing** changes the title, the text, and the link with its name, under the same rules as publishing (`checkAdviceDraft`). It never changes the scope or the anonymity; anonymous advice stays anonymous. Saving unchanged advice writes nothing. Edited advice shows "edited" in the feed.
+- **Deleting** marks the advice `REMOVED` by its author (`removedById`). No student sees it again, in the feed or a search, and it cannot be edited back. It is kept so a report about it (US-43) can still be checked.
+- **Races:** the write matches the author and `VISIBLE` again, so an edit never brings back advice that was deleted or removed in between.
+- **Caching:** every change calls `invalidateCourseAdvice`, so the feed shows it at once.
+- **DoS:** `ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE` edits and deletes per student per minute (default 20).
+- **Logs and responsiveness:** `operation_timed` lines `advice_own_read`, `advice_edit`, `advice_delete`, and the `advice_edited`, `advice_deleted`, `advice_change_*` events. The text, title, and link are never logged.
+- **Tests:** `tests/unit/advice-changes.test.ts`, `tests/unit/advice-edit-page.test.tsx`, `tests/integration/advice-changes.test.ts`, `tests/e2e/advice-changes.spec.ts`, the two edit APIs in `npm run availability`, and `npm run load -- advice-edit`. Details: `ADVICE_CHANGES_REPORT.md`.
+- **Shared files changed:** `prisma/schema.prisma` (one column), the migration, `lib/advice.ts` (`editedAt` in the select, `PublicAdvice.edited`), `components/advice-list.tsx` (the edit link and "edited"), `app/courses/[courseId]/advice/page.tsx` (the notices), `lib/logger.ts` (five events), the advice unit test fixtures (`editedAt: null`), `tests/availability/run.ts`, `.env.example`, and `README.md`.
+
+### Advice from previous students (US-34, US-35, US-37, US-39): open issues
+
+Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advice-rules.ts`), now owned by Mustafa Ergaibi. A review against the stories found no acceptance failure in the code: scopes are checked against the course, only `https://` links are accepted, an anonymous post never carries its author's name or ID to students, and search and filters stay inside the course. These issues are open and **not fixed yet**:
+
+1. No documentation beyond this list: no events-table rows for the six `advice_*` events, and `ADVICE_RATE_LIMIT_PER_HOUR` (default 20) is not in `.env.example`.
+2. No e2e spec and no page tests; only unit and integration tests of the service.
+3. The publish form does not use the shared form styles, and its messages are not notices; 375 px and dark mode are unverified.
+4. The `advice_*` events sit at the top of `lib/logger.ts`, outside any member's comment.
+5. `advice_published` logs the author's `userId` with the `adviceId` for anonymous posts too. Only admins read logs and US-37 keeps the author for moderation, but it needs a decision.
+6. The exam filter finds advice scoped to that exam only, not advice on one of its questions.
+7. The publish form offers only the 100 most frequent questions of a course.
+8. Nothing removes or edits advice yet (the `REMOVED` status has no caller); that belongs to other stories. *(Authors edit and delete since US-36, above.)*
+
+### Known limitations
+
+- **Confidence and recorded practice both update weakness.** Without either, the personal order retains frequency order and identifies the missing profile. Full mock/E5 integration still requires those producers; see the Sprint 4 contract.
+- **A report sent from the personal order returns to the frequency order**, because the report action (US-23) does not keep `order=personal`. Questions keep their numbers, so its notice and `#question-N` still point at the right question.
+
+Monitoring: see the events table (`question_progress_*`, `learning_profile_*`, `priority_calculation_failed`, `topic_confidence_*`). Topics are never logged.
+
+Tests: `tests/unit/learning-profile.test.ts`, `tests/unit/question-progress.test.ts`, `tests/unit/personal-order.test.ts`, `tests/unit/study-progress-pages.test.tsx`, `tests/unit/personal-order-pages.test.tsx`, `tests/integration/learning-profile.test.ts`, `tests/integration/question-progress.test.ts`, `tests/integration/personal-order.test.ts`, `tests/e2e/study-progress.spec.ts`, and `tests/e2e/personal-order.spec.ts`. They create their own courses and students and delete them. Shared files changed: `prisma/schema.prisma`, `lib/logger.ts`, `components/consolidated-exam.tsx`, `app/courses/[courseId]/exam/page.tsx`, `tests/unit/question-report-pages.test.tsx` (one mock line), `README.md`, and `.env.example`; the exact lines are in `MEMBER_3_SPRINT_3_IMPLEMENTATION_REPORT.md`.
+
+## Submissions (US-13)
+
+A logged-in student can submit a past exam or course material at `/submit` (linked from My Courses). It waits for an admin's review and only its submitter and admins can see it until it is published. `/my-submissions` lists the student's submissions with their status and, if rejected, the reason.
+
+- **Model** (migration `20261017000000_file_submissions`). `CourseFile` gained:
+  - `status` (`FileStatus`: `PENDING`, `PUBLISHED`, `REJECTED`). It defaults to `PUBLISHED`, so every older file, every admin upload, and both seeds are unchanged.
+  - `submittedById` (the student; null for admin uploads; set to null if the account is deleted).
+  - `rejectionReason` (set only when the status is `REJECTED`).
+  - `reviewedAt`.
+
+  A submission starts as `PENDING`. An admin publishes it or rejects it with a reason. Both outcomes are final.
+- **Visibility.** `PUBLISHED_FILES` and `canViewFile` (`lib/file-visibility.ts`, re-exported from `lib/submissions.ts`) are the one rule. The course exam and material lists, the question bank (grouping, paper counts, filter options, admin overview), and the consolidated exam (`X of Y`) read published files only, for everyone. `/files/:id` opens an unpublished file for its submitter and admins only, with `Cache-Control: private, no-store`. Anyone else gets the usual "File unavailable" 404, without a course link, so the file's existence isn't revealed. `/admin/files` lists every status and tags pending and rejected files.
+- **File rules.** PDF only. Then the admin upload's checks: not empty, at most 20 MB, real `%PDF-` content, and safe storage as `exams/<uuid>.pdf` or `materials/<uuid>.pdf`. The metadata fields and rules are the shared ones (`lib/file-metadata.ts`): course, optional professor teaching it, year, term, type (exams only), and topic. A refusal returns to the form with the reason, keeping the course and category.
+- **Review functions** (`lib/submissions.ts`, for the admin review page, US-74):
+  - `listPendingSubmissions()`: oldest first, with course, professor, term, and submitter `{ id, name }`.
+  - `publishSubmission(fileId)`: for an exam, also runs `rebuildQuestionBank`.
+  - `rejectSubmission(fileId, reason)`: the reason is required, trimmed, and at most 500 characters.
+
+  Both review functions return `{ ok: true, id, courseId }` or `{ ok: false, error: "not_found" | "not_pending" | "reason_required" | "reason_too_long" }`. Each one is a single conditional update, so two admins can never both review one file. They don't check the caller, so call `requireAdmin()` first.
+
+> **For everyone reading `CourseFile` or `Question`:** any student-facing query, and anything that processes files, must add `...PUBLISHED_FILES` to its `CourseFile` filter.
+> - **Mohammed (US-74, admin review):** build on the three review functions above.
+> - **Ali Slim (US-14, extraction):** extract published exams only. Publishing already regroups.
+> - **Lea (US-17 to US-19):** `getConsolidatedExam` already has the filter; any new paper query needs it too.
+
+Refused and failed submissions are logged as `submission_refused` (with the reason) and `submission_failed`. Admin rejections are logged as `submission_rejected`. Attempts to open a hidden file are logged as `unpublished_file_access`. These log IDs and reasons only, never titles, file names, topics, or the rejection reason.
+
+Tests are in `tests/unit/submissions.test.ts`, `tests/unit/submission-route.test.ts`, `tests/unit/submission-pages.test.tsx`, and `tests/e2e/student-submissions.spec.ts`. The e2e spec creates its own two students and one course and deletes them, the submitted files, and their stored copies at the end. Shared files changed:
+- `prisma/schema.prisma`
+- `lib/uploads.ts` (optional `submission` argument to `saveUpload`)
+- `lib/courses.ts`, `lib/files.ts`, `app/files/[fileId]/route.ts`, `lib/question-bank.ts`, `lib/consolidated-exam.ts` (the published filter)
+- `lib/logger.ts`
+- `middleware.ts`
+- `app/my-courses/page.tsx` (links)
+- `app/admin/files/page.tsx` (status tag)
+- `app/globals.css` (`.status-tag`)
+- `tests/reliability/features/browsing.ts`
+- their unit tests
+
+## Submission review (US-74)
+
+Admins review student submissions (US-13) at `/admin/submissions`, linked as "Review" in the header and from the catalog page.
+
+- **Queue.** Every `PENDING` submission, oldest first (ties broken by ID), 20 per page, with its course, type, details, submitter, and links to open the file and edit its details. An invalid or out-of-range `page` falls back to the first or last page.
+- **Publish** makes the file `PUBLISHED`: it appears on its course page, and for an exam `rebuildQuestionBank` groups and ranks its questions with the course's others, so it enters the question pipeline.
+- **Reject** needs a reason (1 to 500 characters, trimmed). The student sees it on `/my-submissions`, as plain text. The reason is never logged or put in a URL.
+- **Races.** Both are a single conditional update in `lib/submissions.ts`, so a second admin acting on the same file gets "That submission was already reviewed." and the first decision stays.
+- **Rate limit.** At most `REVIEW_RATE_LIMIT_PER_MINUTE` reviews (default 60) per admin per minute; more get "Too many reviews in a minute." without touching the database. The count is kept in memory per server process (`lib/rate-limit.ts`).
+- **Response times.** The queue (`review_queue`), publish (`submission_publish`), and reject (`submission_reject`) each print one `operation_timed` JSON line with `durationMs` to the server log (`lib/timing.ts`). One slower than 1 s is also logged as `slow_operation` and shows on `/admin/monitoring`.
+- **Audit.** Each review is logged as `submission_reviewed` with the file, course, operation, and the admin's ID in `userId`.
+
+The page is `app/admin/submissions/page.tsx`, the actions (`requireAdmin()` first) are `lib/submission-review-actions.ts`, and the queue pages, rate limit, timing, and audit event are `lib/submission-review.ts`, on top of the review functions in `lib/submissions.ts`. Tests are in `tests/unit/submission-review.test.ts`, `tests/unit/submission-review-pages.test.tsx`, `tests/integration/submission-review.test.ts`, and `tests/e2e/admin-submission-review.spec.ts`; the load test is `npm run load -- review-queue`. Details and results: `SUBMISSION_REVIEW_REPORT.md`. Shared files changed:
+- `lib/submissions.ts` (optional page range for `listPendingSubmissions`, and `countPendingSubmissions`)
+- `lib/logger.ts`
+- `app/layout.tsx` (Review link)
+- `app/admin/catalog/page.tsx` (Submissions card)
+- `app/globals.css` (`.field textarea`)
+- `vitest.config.ts`, `package.json`, `.github/workflows/ci.yml`
+
+## Question corrections (Sprint 3)
+
+Admins fix wrongly extracted or wrongly grouped questions so the frequency ranking stays accurate. From `/admin/questions`, "Correct questions" opens a course's groups at `/admin/questions/:courseId`, and "Correct" on a question opens its page.
+
+- **Edit text.** Replaces the question's extracted text (1 to 2,000 characters, trimmed, line breaks kept; text made only of invisible characters is refused). Students see the new text in the question bank and the ordered exam. If another admin changed the text since the form was opened, the edit is refused with "Someone else changed this question's text" instead of overwriting it.
+- **Move to group.** Puts the question in another group of the course, whatever its text says. Counts and ranks are recalculated right away.
+- **Split into its own group.** Takes the question out of its group into a group of its own that its copies do not join.
+- **Group by text again.** Undoes a move or a split.
+- **Surviving the pipeline.** A move is stored as a pin to a question in the target group (`Question.pinnedToQuestionId`), a split as `Question.splitOut`. `rebuildQuestionBank` applies them after the automatic grouping on every rebuild (`groupCorrectedQuestions` in `lib/question-grouping.ts`), so they survive "Regroup and rank", reprocessing a paper, and new papers. A corrected text is never replaced, because a paper that already has questions is not extracted again. If the pinned-to question is deleted (or its paper moves course), the moved question is grouped by its own text again. Moving a question never takes the questions moved onto it along.
+- **Activity log.** Each correction is saved in `QuestionCorrection` with the admin, the paper and question number, and the before and after text or group, and is shown on the course page (latest 50) and the question page. It is kept when the question, paper, or admin is deleted; deleting the course deletes it.
+- **Limits and timing.** At most `CORRECTION_RATE_LIMIT_PER_MINUTE` corrections (default 60) per admin per minute. Each correction takes the course's regroup lock, so it never interleaves with a rebuild. The page and each correction print `operation_timed` lines (`question_corrections_page`, `question_correction_edit|move|split|reset`).
+
+The service is `lib/question-corrections.ts` with messages in `lib/question-correction-rules.ts`, the actions (`requireAdmin()` first) are `lib/question-correction-actions.ts`, and the pages are under `app/admin/questions/[courseId]/`. Tests: `tests/unit/question-corrections-grouping.test.ts`, `tests/unit/question-corrections.test.ts`, `tests/unit/question-correction-pages.test.tsx`, `tests/integration/question-corrections.test.ts`, and `tests/e2e/admin-question-corrections.spec.ts`; the load test is `npm run load -- question-corrections`. Details and results: `QUESTION_CORRECTIONS_REPORT.md`.
+
+## Exam pipeline integration tests (US-92)
+
+`tests/integration/exam-pipeline.test.ts` runs the exam pipeline end to end against a real database: five sample exam PDFs (built in `tests/integration/fixtures/sample-exams.ts`) are uploaded through `POST /api/admin/uploads`, their questions extracted, grouped and ranked by `rebuildQuestionBank`, and the result checked against the expected consolidated ordered exam (`getConsolidatedExam`), question by question, with counts, tiers, and papers. Other tests cover upload order, concurrent uploads, pending and rejected submissions, materials, deleted and re-tagged papers, non-admin uploads, and a 20-paper course within 1 s per stage. They run in CI with `npm run test:integration`.
+
+Exam uploads and published exam submissions now run PDF text extraction, store numbered questions, and rebuild the course's question bank. Each attempt is saved as a processing run. Admins can see its stage and reason, then retry failures at `/admin/processing`. Image-only PDFs fail with "No extractable text"; unreadable PDFs fail separately. Existing questions on older files are kept and regrouped. Load tests: `npm run load -- ordered-exam` and `npm run load -- exam-upload`. `PIPELINE_INTEGRATION_REPORT.md` records the earlier test results, before extraction was connected.
+
+### Sprint 3 extraction and failed-processing checks (Ali Slim)
+
+Typed PDFs support numbered, parenthesized, Q-number and Question-number labels, including compact labels (`2)Explain`) and colon labels (`1: Explain`). Decimals and times in continuation lines stay inside their question. Page numbers, scanner watermarks, section headings and numbered instructions are handled by the existing cross-test fixes. Image-only scans need a typed/searchable replacement; OCR is not implemented.
+
+`/admin/processing` shows each file's latest result. A retry creates a new run and preserves the failed attempt. Simultaneous retries are serialized per file, and a retry of failed grouping reuses existing question rows. A run still marked running after 15 minutes can be retried. Database failures while reading a retry now return a controlled error; failures to save a failed-run record are logged separately.
+
+A retry applies to the attempt displayed on the page. If another tab or admin already retried it, the old form is refused even if that newer attempt has also failed. Reload the page before deliberately retrying the latest attempt. Compact question labels must include punctuation, so a variable such as `Q2value` remains question content.
+
+Processing events appear in `/admin/monitoring` through the shared logger:
+
+| Event | Level | Meaning |
+| --- | --- | --- |
+| `exam_processing_started` | info | File/course/run IDs and whether this is a retry |
+| `exam_processing_completed` | info | Those IDs, retry flag, question count and elapsed milliseconds |
+| `exam_processing_failed` | error | Failed stage, safe reason, error type, retry flag and elapsed time when a run started |
+| `exam_processing_record_failed` | error | The failed-run status could not be saved |
+| `exam_processing_retrieval_failed` | error | Loading the processing list failed |
+| `exam_retry_refused` | warn | No failed/stale run, or the file is no longer eligible |
+
+Question text, titles, original file names and error messages are never included in these events. `tests/e2e/exam-processing-reliability.spec.ts` runs 50 seeded extraction trials and 50 admin-page retry trials against a production build, checking both database results and persisted monitoring events. It cleans up its course and upload copies. Ali Slim's US-15b/US-23 database cross-tests are in `tests/integration/cross-test-us15b-us23.test.ts`; run them with `npm run test:integration`. Results and limitations are in `MEMBER_5_SPRINT_3_IMPLEMENTATION_REPORT.md` and `CROSS_TEST_ALI_SLIM_US15B_US23.md`.
+
+## Accuracy evaluation set (US-93)
+
+A hand-checked set of exam questions with their correct ("gold") groups measures how well grouping (US-15a) and ranking (US-16) work, and catches regressions when the grouping logic changes, or later its model or prompt (US-15b).
+
+- **The set** is versioned with the code: `eval/grouping/synthetic/dataset.json`, 16 made-up papers in two courses (78 questions, 32 gold groups) written to look like extracted papers. Each question is `[gold group, text as extracted]`; `notes` explains the gold decisions a reviewer could read either way. Change the papers or gold groups only together with a higher `version`, which makes the old baseline unusable on purpose.
+- **Real papers stay local.** Sets built from real past papers go in `eval/grouping/local/` (gitignored, because the repository is public), for example the hand-transcribed MATH 201 Quiz 1 set, and run with `npm run eval:grouping -- eval/grouping/local/math201-quiz1`.
+- **Metrics** (`lib/grouping-eval.ts`): pair precision, recall, and F1 (over every pair of questions in a course: grouped together vs really the same question), gold groups reproduced exactly, questions shown with the right paper count, Kendall tau-b rank correlation with the gold ranking, and top-5 precision.
+- **Regression check.** Each set folder has a `baseline.json` (set name and version, grouper, metrics, date). A run fails when a metric drops more than 0.02 below it or falls under its floor (pair precision 0.95, pair F1 0.6, rank correlation 0.6), or when the baseline belongs to another version of the set. `--update-baseline` records a new one after the result is reviewed.
+- **A new grouper** (a model or prompt for US-15b) implements the `Grouper` type and is evaluated the same way; its name and version are stored in the baseline.
+
+Tests: `tests/unit/grouping-eval.test.ts`. Report: `ACCURACY_AND_AVAILABILITY_REPORT.md`.
+
+## Availability and reliability
+
+`npm run availability` measures every API's availability and reliability as the number of concurrent users grows (1, 10, 25, 50, 100 by default). Logged-in students repeat a weighted mix of 10 APIs: catalog search, course page, exam list, question bank, ordered exam, opening a file, My Courses, profile, logging in, and adding a course.
+
+- **Availability** = successful requests / total requests, per API. A request fails when it times out (10 s), the connection fails, the server answers 5xx, or it answers a status that API never gives for that request.
+- **Reliability** is stricter: the reply must also be correct (the page shows the course, the file is a PDF, the login redirects to My Courses) and within the latency target (1 s).
+- **Per API and stage:** requests, successes, failures, availability, error rate, reliability, p50/p95/p99/max latency, throughput, timeouts, and error types. **Per stage:** machine CPU, the server's memory, database connections, and the most requests in flight. **After the run:** the time to recover to normal replies. It also gives the yearly downtime each availability means, the "nines", and a 95% lower bound (with no failure in N requests, a run can only show about 1 - 3/N).
+- **Capacity** is the most users at which every API met the availability target (`AVAILABILITY_TARGET`, default 99.9%) and the overall p99 stayed within 1 s. The report also lists, per API, the failures that only appeared at higher load.
+
+More users do not change availability by themselves. They produce more requests (so a high availability becomes measurable), exercise more paths, and add concurrency and pressure on CPU, memory, and database connections, which exposes rare failures and bottlenecks. Availability stays stable or drops once the app reaches its capacity.
+
+The tool is `tests/availability/run.ts` with the numbers in `tests/availability/metrics.ts` (tested in `tests/unit/availability-metrics.test.ts`). It creates stamped students and deletes them, their sessions, and their My Courses entries at the end.
+
+## Profile (US-04)
+
+A logged-in user edits their own profile at `/profile`, linked as "Profile" in the header. The email is shown but can't be changed here, since it is the login.
+
+- **Fields** (migration `20261018000000_user_profile`):
+  - `User.name`: required, at most 100 characters, with spaces trimmed and collapsed.
+  - `User.facultyId`: optional, chosen from the `Faculty` list; set to null if the faculty is deleted.
+  - `User.major`: optional, short free text, at most 100 characters.
+
+  An empty faculty or major clears it. The limits and messages are in `lib/profile-rules.ts`, shared with the form.
+- **Whose profile.** Always the session user's (`requireUser("/profile")`). The server action reads only `name`, `facultyId`, and `major`, so an ID added to the form is ignored. `/profile/:id` and `/profile/:id/edit` send your own ID to `/profile`. Anyone else's ID gets the not-found page, the same as other denied pages, without saying whether the account exists, and is logged as `unauthorized_access`. A visitor is sent to log in.
+- **Errors** such as "Enter your name." appear above the form, and the form keeps what was typed. The typed values come back through the action's state (`useActionState`), not the URL, so a name never lands in a link or in browser history. Nothing is saved, so the stored profile keeps its old values.
+
+Refused saves are logged as `profile_save_rejected` (with the reason), and failures as `profile_save_failed` and `profile_retrieval_failed`. Only the user ID, reason, and error type or code are logged, never a name, major, or email.
+
+The service is `lib/profile.ts`, the action is `lib/profile-actions.ts`, the pages are `app/profile/page.tsx` and `app/profile/[...path]/page.tsx`, and the form is `components/profile-form.tsx`. Tests are in `tests/unit/profile.test.ts`, `tests/unit/profile-pages.test.tsx`, and `tests/e2e/profile.spec.ts`, which creates its own students and faculty and deletes them. Shared files changed:
+- `prisma/schema.prisma`
+- `lib/logger.ts`
+- `middleware.ts` (`/profile`)
+- `app/layout.tsx` (Profile link)
+- `app/globals.css` (`.field-value`)
+- `tests/unit/middleware.test.ts`
+
+## Password reset (US-03)
+
+"Forgot password?" on `/login` leads to `/forgot-password`. After any request, the page shows the same message: "If an account exists for that email, we've sent a link to reset your password. The link works once and expires in 30 minutes." The link opens `/reset-password?token=…`, which takes a new password under the sign-up rules (at least 8 characters, typed twice).
+
+- **Links** (migration `20261019000000_password_reset`, table `PasswordResetToken`):
+  - The token is 32 random bytes. Only its SHA-256 hash is stored, as for sessions.
+  - A link expires after 30 minutes and works once.
+  - A new request replaces every older unused link.
+  - Links older than 24 hours are deleted the next time the same user asks for one.
+- **A reset** checks the password first. A weak or mismatched password is refused without using up the link. The link is then claimed in one transaction with a conditional update, so two tabs can't both use it. The same transaction changes the password, logs out **all** of that user's sessions, and replaces the other links. Used, expired, replaced, and unknown links each get a clear message and a "Request a new link" button. The page sends no Referer (`referrer: no-referrer`), so the token doesn't leak to other sites.
+- **Neutral answers.** Registered, unregistered, and malformed emails all redirect to the same `/forgot-password?sent=1`.
+- **Rate limit.** At most 3 links per account per 15 minutes. Further requests show the same message and send nothing, so the limit doesn't reveal whether the email exists.
+- **Mail** (`lib/mail.ts`):
+  - **With a provider.** Set `MAIL_API_URL`, `MAIL_API_KEY`, and `MAIL_FROM` to send through an HTTP mail API. The module posts `{ from, to, subject, text }` as JSON with `Authorization: Bearer <key>`, which is Resend's format (`https://api.resend.com/emails`); a provider with a different format needs a change to `sendMail`.
+  - **Link origin.** Set `APP_URL` to the site's public origin. Links are never built from the request's Host header.
+  - **Development without a provider.** `npm run dev` prints the email, including the link, to the server terminal, in a block marked `DEV ONLY`. `APP_URL` defaults to `http://localhost:3000` there.
+  - **Production or tests without a provider.** Nothing is printed and nothing is sent. The request is logged as `password_reset_email_failed` with the reason `not_configured` or `app_url_not_configured`.
+  - The link and token are never logged anywhere, including the log database.
+- **Monitoring.** See the events table. Only IDs, reasons, and error types are logged, never emails, tokens, links, or passwords. A link is identified by its row ID, `resetLinkId`, because the logger drops any key containing "token".
+- **Known limitation.** The email is sent in the background, so a slow provider doesn't make a registered email answer later. A registered email still costs a few more database reads and writes than an unknown one, so the response times can differ slightly.
+
+The service is `lib/password-reset.ts`, the actions are `lib/password-reset-actions.ts`, and the pages are `app/forgot-password/page.tsx` and `app/reset-password/page.tsx`. Tests are in `tests/unit/password-reset.test.ts`, `tests/unit/password-reset-pages.test.tsx`, `tests/unit/mail.test.ts`, and `tests/e2e/password-reset.spec.ts`. The e2e test creates its own student, makes links through `requestPasswordReset` with a capturing sender, and deletes the student, which also removes its links and sessions. Shared files changed:
+- `prisma/schema.prisma`
+- `lib/logger.ts`
+- `app/login/page.tsx` (link and notice)
+- `.env.example`
+
+## Authentication and My Courses (Member 1)
+
+`/signup`, `/login`, and `/my-courses` cover US-01 (create an account), US-02 (log in and log out), and US-07 (add a course to My Courses). Sessions are rows in the database, not JWTs, so logging out really revokes the session.
+
+- **Sign-up** needs a name, a valid email, and a password of at least `PASSWORD_MIN_LENGTH` (8) characters. Emails are normalized with `trim().toLowerCase()`, so `Ali@…` and `ali@…` are one account. A second sign-up with the same email says the account already exists. Setting `SIGNUP_EMAIL_DOMAIN` (for example `@mail.aub.edu`) restricts sign-up to one domain. A new account is sent to `/login`, not logged in automatically.
+- **Login** always answers "Invalid email or password," whether the email is unknown or the password is wrong, so nobody can test which emails are registered. Passwords are bcrypt hashes (cost 10).
+- **Sessions** store only the SHA-256 hash of a 32-byte random token; the raw token lives in an `httpOnly`, `SameSite=Lax`, 7-day cookie, marked `Secure` in production. Logging out deletes the row and the cookie, and logout is a `POST` form so a prefetch or an image tag cannot end a session.
+- **Access** is enforced in the data layer with `requireUser()`, `requireAdmin()`, and `getAdminUser()` from `lib/auth.ts`, called inside pages, server actions, and route handlers. `middleware.ts` only redirects a request without a session cookie to `/login?next=…`, because middleware-only authentication has been bypassed before (CVE-2025-29927). Browsing and course pages stay open to visitors; `/my-courses` and `/admin/*` need a session.
+- **`next` redirects** accept relative paths only, so a crafted login link cannot send a student to another site.
+- **My Courses** uses a composite primary key `@@id([userId, courseId])`, so a duplicate is impossible in the database; the second of two racing clicks fails with Prisma `P2002` and is reported as "Already in My Courses." Adding an unknown course ID returns 404.
+
+Data functions live in `lib/auth.ts` and `lib/my-courses.ts`, server actions in `lib/auth-actions.ts` and `lib/my-courses-actions.ts`, and the shared cookie constants and `safeNext` in `lib/session-cookie.ts` so `middleware.ts` stays free of Node-only imports.
+
+Failures are logged with `logError` as `signup_failed`, `login_failed`, `session_validation_failed`, `logout_failed`, `unauthorized_access`, `my_courses_add_failed`, and `my_courses_retrieval_failed`. Only IDs, roles, routes, reasons, and error types are logged, never an email, password, or session token.
+
+Tests are in `tests/unit/auth.test.ts`, `tests/unit/auth-actions.test.ts`, `tests/unit/my-courses.test.ts`, `tests/unit/auth-pages.test.tsx`, `tests/unit/add-to-my-courses.test.tsx`, `tests/unit/middleware.test.ts`, and `tests/e2e/auth-my-courses.spec.ts`.
+
+## Catalog management (Member 4)
+
+`/admin/catalog` covers US-69 (manage the course catalog). Admins add and edit faculties, courses, professors, and terms, and assign professors to courses. Every change shows in the catalog at `/` and its filters straight away. Entries cannot be deleted yet. The header shows an "Admin" link to admins only.
+
+- **Access.** Every page and server action calls `requireAdmin()` first. A student gets the not-found page, and a visitor is sent to `/login?next=…`.
+- **Course and faculty codes** are stored without spaces and in capitals, so `eece 350` is saved as `EECE350` and refused if that code exists, matching Member 2's search. A code is 2 to 20 letters or digits. The duplicate check gives the message, and the unique index refuses a racing second save (`P2002`), which shows the same message.
+- **Terms** (`Term`, added in `20261005000000_catalog_terms`) are a list of names such as Fall, Spring, and Summer, seeded by `npm run db:seed`. Names are unique ignoring case. Files link to a term (US-72).
+- **Professors** have no uniqueness rule, since two professors can share a name. A course's professors are set together with the course in one transaction.
+
+The service is `lib/catalog-admin.ts`, the server actions are `lib/catalog-admin-actions.ts`, and the pages are under `app/admin/catalog/`, with `components/catalog-notice.tsx` and `components/course-fields.tsx`.
+
+Failures are logged with `logError` as `catalog_entry_rejected` (with the entity and reason: `invalid_fields`, `duplicate_code`, `duplicate_name`, `not_found`, `unknown_faculty`, or `unknown_professor`), `catalog_entry_save_failed` (entity, `create` or `update`, entry ID, error type), and `catalog_admin_retrieval_failed`. Codes and names typed by admins are never logged.
+
+### File metadata (US-72)
+
+`/admin/files` lists every file, filterable by course, and `/admin/files/:id` sets a file's course, professor, year, term, type, and topic. The catalog overview links to it.
+
+- **Fields.** `CourseFile.session` (free text) is replaced by `termId` (a link to `Term`) and `examType` (`MIDTERM`, `FINAL`, `QUIZ`, `OTHER`), in migration `20261006000000_file_metadata`. The migration moved existing values into the term or type. Any text that was not exactly a term name or a type word is kept in the topic.
+- **Rules**, the same for the edit page and the upload form (`lib/file-metadata-rules.ts`, `lib/file-metadata.ts`):
+  - The course is required and must exist.
+  - The professor is optional but must teach that course.
+  - The term is optional but must exist.
+  - The year is optional, 4 digits, from 1950 to next year.
+  - The topic is at most 100 characters.
+  - A type is allowed on exams only.
+- **Retagging.** Changing the course moves the file to the new course's pages straight away. The professor list follows the chosen course.
+
+Failures are logged as `file_metadata_rejected` (file ID and reason), `file_metadata_save_failed` (file ID and error type), and `file_metadata_retrieval_failed`. Titles and topics are never logged.
+
+Tests are in `tests/unit/catalog-admin.test.ts`, `tests/unit/catalog-admin-actions.test.ts`, `tests/unit/catalog-admin-pages.test.tsx`, `tests/unit/file-metadata.test.ts`, `tests/unit/file-metadata-actions.test.ts`, `tests/unit/file-metadata-pages.test.tsx`, `tests/e2e/admin-catalog.spec.ts`, and `tests/e2e/admin-file-metadata.spec.ts`. Admin e2e tests log in through `tests/e2e/fixtures.ts`, which reads `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`. Shared files changed: `prisma/schema.prisma` and `prisma/seed.ts` (terms), `lib/logger.ts` (the three events above), `app/layout.tsx` (the Admin link), and `app/globals.css` (`.field select`, `.checkbox-list`, `.catalog-list`, `.catalog-links`).
+
+## Monitoring (US-87)
+
+Every feature reports failures through one function, `logError(event, context)` in `lib/logger.ts`. Each call:
+
+1. classifies the event,
+2. cleans its context,
+3. prints one JSON line to the server console, and
+4. saves the line to the `LogEntry` table in the background.
+
+Admins see the result at `/admin/monitoring`, and a burst of errors raises an alert.
+
+### Levels
+
+| Level | Meaning |
+| --- | --- |
+| `error` | Something failed that should not have: a database read or write, storage, a missing or unreadable file |
+| `warn` | An expected refusal: a wrong password, a duplicate, a rejected upload, a student on an admin page |
+| `info` | Notable but fine: the monitoring alert itself |
+
+The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript requires a level for every event. One rule sits next to it: a `warn` event logged with `reason: "db_error"` is raised to `error`, because the refusal was caused by the database failing.
+
+### Events
+
+| Member | Event | Level | Context |
+| --- | --- | --- | --- |
+| 1 | `signup_failed` | warn (error for `db_error`) | `reason`, `errorType` |
+| 1 | `login_failed` | warn (error for `db_error`) | `reason`, `userId`, `errorType` |
+| 1 | `session_validation_failed` | warn (error for `db_error`) | `reason`, `sessionId`, `userId`, `errorType` |
+| 1 | `unauthorized_access` | warn | `route`, `role`, `userId` |
+| 1 | `logout_failed`, `my_courses_add_failed`, `my_courses_retrieval_failed` | error | `userId`, `courseId`, `errorType` |
+| 2 | `course_catalog_retrieval_failed`, `course_search_failed`, `catalog_filter_options_retrieval_failed` | error | filter IDs, `errorType` |
+| 2 | `question_grouping_rejected` | warn | `courseId`, `reason` |
+| 2 | `question_grouping_failed`, `question_bank_retrieval_failed`, `question_search_failed` | error | `courseId`, filter values (never the keyword), `errorType` |
+| 3 | `course_retrieval_failed`, `exam_list_retrieval_failed`, `material_list_retrieval_failed` | error | `courseId`, `resourceCategory`, `errorType` |
+| 3 | `file_record_not_found` | warn | `fileId` |
+| 3 | `physical_file_not_found`, `invalid_storage_key` | error | `fileId` |
+| 3 | `file_open_failed` | error | `fileId`, `errorType`, `errorCode` |
+| 4 | `catalog_entry_rejected`, `file_metadata_rejected` | warn | `entity`, `reason`, `entryId` or `fileId` |
+| 4 | `catalog_entry_save_failed`, `catalog_admin_retrieval_failed`, `file_metadata_save_failed`, `file_metadata_retrieval_failed` | error | entity, IDs, `operation`, `errorType` |
+| 4 | `monitoring_alert_triggered` | info | `count`, `threshold`, `windowMinutes`, `events`, `webhook` |
+| 5 | `upload_rejected` | warn | `reason`, `courseId`, `resourceCategory` |
+| 5 | `upload_storage_failed`, `upload_record_failed`, `upload_cleanup_failed`, `upload_failed`, `upload_options_retrieval_failed` | error | `courseId`, `resourceCategory`, `errorType`, `errorCode`; `source=submission` for a student submission |
+| 1 (Sprint 2) | `submission_refused` | warn | `reason`, `courseId`, `resourceCategory`, `userId` |
+| 1 (Sprint 2) | `submission_failed`, `submission_retrieval_failed`, `submission_review_failed` | error | `courseId`, `resourceCategory`, `userId`, `fileId`, `entity`, `operation`, `errorType` |
+| 1 (Sprint 2) | `submission_rejected` | info | `fileId` (never the reason) |
+| 1 (Sprint 2) | `unpublished_file_access` | warn | `fileId`, `role`, `userId` |
+| 1 (Sprint 2) | `profile_save_rejected` | warn | `userId`, `reason` |
+| 1 (Sprint 2) | `profile_save_failed`, `profile_retrieval_failed` | error | `userId`, `entity`, `errorType`, `errorCode` |
+| 1 (Sprint 2) | `password_reset_requested`, `password_reset_completed` | info | `outcome` (`sent` or `unknown_email`), `userId`, `resetLinkId`, `sessionsEnded` |
+| 1 (Sprint 2) | `password_reset_rate_limited`, `password_reset_token_rejected`, `password_reset_rejected` | warn | `userId`, `reason` (`used`, `expired`, `superseded`, `unknown`, `weak_password`, `password_mismatch`), `resetLinkId` |
+| 1 (Sprint 2) | `password_reset_failed`, `password_reset_email_failed` | error | `stage`, `userId`, `reason`, `errorType`, `errorCode` |
+| US-74 | `submission_reviewed` | info | `fileId`, `courseId`, `operation`, `userId` (the admin) |
+| US-74 | `submission_review_refused`, `submission_review_rate_limited` | warn | `fileId`, `operation`, `reason`, `userId`, `retryAfterSeconds` |
+| Sprint 3 | `question_corrected` | info | `courseId`, `questionId`, `kind` (`edit`, `move`, `split`, `reset`), `userId` (the admin), `regrouped` |
+| Sprint 3 | `question_correction_refused`, `question_correction_rate_limited` | warn | `courseId`, `questionId`, `kind`, `reason`, `userId`, `retryAfterSeconds` |
+| Sprint 3 | `question_correction_failed`, `question_correction_retrieval_failed` | error | `courseId`, `questionId`, `kind`, `userId`, `errorType` |
+| US-74 | `slow_operation` | warn | `operation`, `durationMs`, and the operation's IDs |
+| 2 (Sprint 3) | `question_grouping_completed` | info | `courseId`, `questionCount`, `groupCount`, `rewordedMatches`, `lowConfidenceMatches` |
+| 2 (Sprint 3) | `question_grouping_low_confidence` | warn | `courseId`, `questionId`, `matchedQuestionId`, `score` |
+| 2 (Sprint 3) | `question_report_submitted` | info | `reportId`, `courseId`, `groupId`, `category` (the reason), `userId` (never the note) |
+| 2 (Sprint 3) | `question_report_refused`, `question_report_rate_limited` | warn | `groupId`, `reason`, `userId`, `retryAfterSeconds` |
+| 2 (Sprint 3) | `question_report_failed`, `question_report_retrieval_failed` | error | `groupId`, `userId`, `errorType` |
+| 3 (Sprint 3) | `question_progress_saved` | info | `userId`, `courseId`, `groupId`, `operation` (`mark` or `undo`) |
+| 3 (Sprint 3) | `question_progress_refused`, `question_progress_rate_limited` | warn | `groupId`, `reason` (`invalid_choice`, `not_found`), `userId`, `retryAfterSeconds` |
+| 3 (Sprint 3) | `question_progress_failed`, `question_progress_retrieval_failed` | error | `userId`, `courseId`, `groupId`, `operation` (`mark` or `relink`), `errorType` |
+| 3 (Sprint 3) | `learning_profile_retrieval_failed`, `learning_profile_update_failed` | error | `userId`, `courseId`, `source` (`personal_order`, `topic_confidence`), `errorType` (never a topic) |
+| Mustafa Ergaibi (Sprint 3) | `priority_calculation_failed` | error | `userId`, `courseId`, `affectedQuestions`, `reasons` (`invalid_paper_count`, `invalid_total_papers`, `paper_count_exceeds_total`, `invalid_weakness`); at most one line per ranking |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_saved` | info | `userId`, `courseId`, `ratedTopics`, `skippedTopics`, `unchangedTopics` (never a topic) |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_refused`, `topic_confidence_rate_limited` | warn | `userId`, `courseId`, `reason` (`unknown_topic`, `invalid_rating`, `no_ratings`), `retryAfterSeconds` |
+| Mustafa Ergaibi (Sprint 3) | `topic_confidence_save_failed` | error | `userId`, `courseId`, `errorType` |
+| Mustafa Ergaibi (Sprint 4) | `topic_strengths_retrieval_failed` | error | `userId`, `courseId`, `source` (`profile`, `course_topics`, `covered`, `selection`), `errorType` (never a topic); one line per failed page load |
+| Mustafa Ergaibi (Sprint 4) | `topic_strengths_invalid_data` | warn | `userId`, `courseId`, `invalidTopics` (a count, never a topic); at most one line per page load |
+| Mustafa Ergaibi (Sprint 4) | `study_recommendation_failed` | error | `userId`, `courseId`, `step` (`profile`, `course_topics`, `covered`, `selection`), `errorType` (never a topic); one line per failed page load |
+| Mustafa Ergaibi (Sprint 4) | `study_recommendation_invalid_inputs` | warn | `userId`, `courseId`, `affectedTopics` (a count, never a topic), `reasons` (the `checkedPriority` reason codes); at most one line per page load |
+| Mustafa Ergaibi (Sprint 4) | `topic_covered_saved` | info | `userId`, `courseId`, `covered` (`true`, `false`), `changed` (`false` when the topic already was as asked); never a topic |
+| Mustafa Ergaibi (Sprint 4) | `topic_covered_refused`, `topic_covered_rate_limited` | warn | `userId`, `courseId`, `reason` (`unknown_topic`, `invalid_value`), `retryAfterSeconds`; never a topic or the submitted value |
+| Mustafa Ergaibi (Sprint 4) | `topic_covered_save_failed` | error | `userId`, `courseId`, `errorType` |
+| Sprint 4, mock exams (US-45) | `mock_exam_created` | info | `userId`, `courseId`, `mockExamId`, `difficulty`, `length`, `topicCount`, `generatedCount` (never a topic, a question or an answer) |
+| Sprint 4, mock exams (US-45) | `mock_exam_refused`, `mock_exam_rate_limited` | warn | `userId`, `courseId`, `reason` (`course_not_found`, `no_questions`, `topic_invalid`, `length_invalid`, `difficulty_invalid`, `not_enough_questions`), `retryAfterSeconds` |
+| Sprint 4, mock exams (US-45) | `mock_exam_failed`, `mock_exam_retrieval_failed` | error | `userId`, `courseId`, `mockExamId`, `entity` (`options`, `list`), `errorType`, `errorCode` |
+| Sprint 4, mock exams (US-45) | `mock_exam_saved`, `mock_exam_submitted` | info | `userId`, `mockExamId`, `submit` (never an answer) |
+| Sprint 4, mock exams (US-45) | `mock_exam_save_refused` | warn | `userId`, `mockExamId`, `submit`, `reason` (`not_found`, `already_submitted`, `answer_too_long`) |
+| Sprint 4, mock exams (US-45) | `mock_exam_save_failed` | error | `userId`, `mockExamId`, `submit`, `errorType`, `errorCode` |
+| Mohammed Al-Haiqi (Sprint 4, US-38) | `advice_feed_rate_limited` | warn | `userId`, `retryAfterSeconds`; the student opened advice pages more than `ADVICE_FEED_RATE_LIMIT_PER_MINUTE` times in a minute |
+| Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_edited`, `advice_deleted` | info | `adviceId`, `courseId`, `userId`, `hasLink` (edits); never the title, text, or link |
+| Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_change_refused`, `advice_change_rate_limited` | warn | `adviceId`, `userId`, `operation` (`edit`, `delete`), `reason` (`not_found`, `title_required`, `title_too_long`, `body_required`, `body_too_long`, `link_invalid`, `link_title_too_long`) or `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_change_failed` | error | `adviceId`, `userId`, `operation`, `errorType` |
+
+### What is never logged
+
+Only IDs, roles, routes, reasons, error types, and error codes are logged. Error messages are never logged, and neither is anything a user typed: names, emails, titles, passwords, tokens, or file contents.
+
+The logger also enforces three rules on every line, whatever the caller passes:
+- Every value is cut to 200 characters.
+- Control characters are removed, so a value cannot fake a second log line.
+- Keys that look sensitive (`password`, `token`, `secret`, `cookie`, `email`, `authorization`, `apiKey`) are dropped.
+
+To log a Node or Prisma error code (`ENOENT`, `EACCES`, `P2002`) without its message, use `errorCode(error)`.
+
+### Persistence and retention
+
+- **Background save.** Lines are saved to `LogEntry` (`level`, `event`, `context`, `createdAt`). A request never waits for the save.
+- **Database failure.** If the database is down or the table is missing, logging falls back to the console and prints one `log_persistence_unavailable` warning. It never logs about its own failure.
+- **Edge and test runtimes.** The logger loads the database code lazily, so it is safe to import from edge code. Under unit tests it never loads it at all.
+- **Turning it off.** Set `LOG_PERSIST=off` to keep logs on the console only.
+- **Retention.** Entries older than 30 days are deleted at most once an hour, on the next log write or when `/admin/monitoring` is opened.
+
+### The monitoring page
+
+`/admin/monitoring` is for admins only. It is linked from the header ("Monitoring") and from `/admin/catalog`. It shows:
+- an alert banner, while the error count is at or above the threshold or an alert was raised within the cooldown;
+- the counts per event and level for the last 24 hours;
+- the newest 100 entries, filterable by level, event, and time range (last hour, 24 hours, 7 days, or 30 days).
+
+### Alerts
+
+When at least `ALERT_THRESHOLD` error-level events (default 5) occur within `ALERT_WINDOW_MINUTES` (default 10), the app records a `monitoring_alert_triggered` entry. If `ALERT_WEBHOOK_URL` is set, it also posts one message to it.
+
+- **Message content.** Event names and counts only, in Discord's format (`{ "content": … }`), with mentions disabled.
+- **Cooldown.** After an alert, no other alert is raised for `ALERT_COOLDOWN_MINUTES` (default: the window), so one incident sends one message.
+- **Setup.** In Discord, open Server Settings, then Integrations, then Webhooks, then New Webhook, and copy the URL into `ALERT_WEBHOOK_URL` in `.env`. Only `https` URLs are used, plus plain `http` to `localhost` for testing.
+- **Failure.** A failing webhook prints one `alert_webhook_failed` warning, never the URL.
+
+**Demo:**
+1. Open http://localhost:3000/files/file-missing five times (the seeded record whose file is deliberately missing).
+2. Open http://localhost:3000/admin/monitoring as the admin. The banner shows "Alert: 5 errors in the last 10 minutes", and the entries show `physical_file_not_found` with `fileId=file-missing`.
+
+Tests are in `tests/unit/logger.test.ts`, `tests/unit/log-store.test.ts`, `tests/unit/monitoring-page.test.tsx`, and `tests/e2e/admin-monitoring.spec.ts`.

@@ -14,6 +14,7 @@ vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
 vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: () => true }));
 vi.mock("@/lib/advice-changes", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/advice-changes")>(), getOwnAdvice: mocks.getOwnAdvice }));
 vi.mock("@/lib/advice-change-actions", () => ({ editAdviceAction: vi.fn(), deleteAdviceAction: vi.fn() }));
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => null }));
 import EditAdvicePage from "@/app/courses/[courseId]/advice/[adviceId]/edit/page";
 import AdvicePage from "@/app/courses/[courseId]/advice/page";

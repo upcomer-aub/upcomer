@@ -13,6 +13,7 @@ vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
 vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: mocks.allowAdviceFeedRead }));
 vi.mock("@/lib/advice-changes", () => ({ adviceChangeMessage: (error: string) => `message for ${error}` }));
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => <form data-advice-form="true" /> }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 
@@ -72,5 +73,20 @@ describe("advice page", () => {
     expect(html).toContain("Page 2 of 3");
     expect(html).toContain("page=1");
     expect(html).toContain("page=3");
+  });
+});
+
+describe("advice page, reporting (US-43)", () => {
+  it("offers a logged-in student a report link on other students' advice, and a visitor none", async () => {
+    expect(await render()).toContain('href="/courses/course-a/advice/a1/report"');
+    mocks.getCurrentUser.mockResolvedValue(null);
+    expect(await render()).not.toContain("Report this advice");
+  });
+
+  it("shows the outcome of a report, and only the message for a refusal", async () => {
+    expect(await render({ reported: "1" })).toContain("Thanks, your report was sent.");
+    const html = await render({ report_error: "<b>x</b>" });
+    expect(html).toContain("Your report could not be sent.");
+    expect(html).not.toContain("<b>x</b>");
   });
 });

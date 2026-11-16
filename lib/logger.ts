@@ -11,6 +11,10 @@ type LogEvent =
   | "advice_change_refused"
   | "advice_change_rate_limited"
   | "advice_change_failed"
+  | "advice_report_submitted"
+  | "advice_report_refused"
+  | "advice_report_rate_limited"
+  | "advice_report_failed"
   | "learning_evidence_saved"
   | "learning_evidence_failed"
   | "learning_evidence_refused"
@@ -148,6 +152,10 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   advice_change_refused: "warn",
   advice_change_rate_limited: "warn",
   advice_change_failed: "error",
+  advice_report_submitted: "info",
+  advice_report_refused: "warn",
+  advice_report_rate_limited: "warn",
+  advice_report_failed: "error",
   learning_evidence_saved: "info",
   learning_evidence_failed: "error",
   learning_evidence_refused: "warn",

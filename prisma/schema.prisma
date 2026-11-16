@@ -69,6 +69,8 @@ model User {
   // Added for US-34: advice a student wrote, and advice an admin removed.
   advice              Advice[]             @relation("AdviceAuthored")
   removedAdvice       Advice[]             @relation("AdviceRemoved")
+  adviceReports       AdviceReport[]       @relation("AdviceReporter")
+  closedAdviceReports AdviceReport[]       @relation("AdviceReportClosedBy")
   // Added for US-45: the mock exams a student generated.
   mockExams           MockExam[]
 
@@ -136,6 +138,7 @@ model Course {
   generatedQuestions GeneratedPracticeQuestion[]
   // Added for US-34.
   advice           Advice[]
+  adviceReports    AdviceReport[]
   // Added for US-45.
   mockExams        MockExam[]
   createdAt        DateTime           @default(now())
@@ -509,6 +512,7 @@ model Advice {
   removedBy     User?           @relation("AdviceRemoved", fields: [removedById], references: [id], onDelete: SetNull)
   // Set when the author last edited the title, text, or link (US-36).
   editedAt      DateTime?
+  reports       AdviceReport[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -518,6 +522,55 @@ model Advice {
   @@index([fileId])
   @@index([termId])
   @@index([groupId])
+}
+
+// What a student says is wrong with a piece of advice (US-43).
+enum AdviceReportReason {
+  // Insulting, harassing, or hateful.
+  OFFENSIVE
+  // Advertising, or not about the course.
+  SPAM
+  // Names or details of a person who did not agree to it.
+  PERSONAL_INFO
+  // Encourages cheating or breaking course rules.
+  ACADEMIC_DISHONESTY
+  OTHER
+}
+
+// OPEN reports wait for an admin (US-77). RESOLVED means the admin removed the advice; DISMISSED that they kept it.
+enum AdviceReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+// One student's report of one piece of advice (US-43). A student cannot open a second report of the same advice while
+// their first is open (see lib/advice-reports.ts). Only admins see reports; the reporter is never shown to the author or
+// to other students. The row is kept after the advice is removed, so the admin's decision stays on record. Added in
+// migration 20261116000003_advice_reports.
+model AdviceReport {
+  id         String             @id @default(cuid())
+  adviceId   String
+  advice     Advice             @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Null if the student's account was deleted.
+  reporterId String?
+  reporter   User?              @relation("AdviceReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     AdviceReportReason
+  // Optional details from the student, at most 500 characters; shown to admins, never logged.
+  note       String?
+  status     AdviceReportStatus @default(OPEN)
+  closedAt   DateTime?
+  closedById String?
+  closedBy   User?              @relation("AdviceReportClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@index([status, createdAt])
+  @@index([adviceId, status])
+  @@index([reporterId, status])
+  @@index([courseId])
 }
 
 enum LearningSource {

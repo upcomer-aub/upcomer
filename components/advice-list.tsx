@@ -3,8 +3,12 @@ import type { PublicAdvice } from "@/lib/advice";
 import { SCOPE_LABELS } from "@/lib/advice-rules";
 
 // Shows advice exactly as students may see it: PublicAdvice has no author ID, and an anonymous post has no author name.
-// page: the feed page shown, so an author who edits a post comes back to it (US-36).
-export function AdviceList({ items, emptyMessage, page = 1 }: { items: PublicAdvice[]; emptyMessage: string; page?: number }) {
+// page: the feed page shown, so an author who edits or a student who reports comes back to it (US-36, US-43).
+// canReport: a logged-in viewer, who may report other students' advice (US-43); reported: the advice they already reported
+// and that is still waiting for an admin, which says so instead of offering the report again.
+export function AdviceList({ items, emptyMessage, page = 1, canReport = false, reported = new Set() }: {
+  items: PublicAdvice[]; emptyMessage: string; page?: number; canReport?: boolean; reported?: ReadonlySet<string>;
+}) {
   if (!items.length) return <p className="muted">{emptyMessage}</p>;
   return <>{items.map(advice => <article key={advice.id} id={`advice-${advice.id}`} className="card">
     <h3>{advice.title}</h3>
@@ -18,5 +22,8 @@ export function AdviceList({ items, emptyMessage, page = 1 }: { items: PublicAdv
     {advice.resourceUrl?.startsWith("https://") && <p><a href={advice.resourceUrl} target="_blank" rel="noopener noreferrer nofollow">{advice.resourceTitle || advice.resourceUrl}</a> <span className="muted">(external link)</span></p>}
     {/* Only the author is offered the change (US-36); the edit page checks it again. */}
     {advice.isMine && <p><Link href={`/courses/${encodeURIComponent(advice.courseId)}/advice/${encodeURIComponent(advice.id)}/edit${page > 1 ? `?page=${page}` : ""}`}>Edit or delete your advice</Link></p>}
+    {canReport && !advice.isMine && (reported.has(advice.id)
+      ? <p className="muted">You reported this advice. An admin will check it.</p>
+      : <p className="muted"><Link href={`/courses/${encodeURIComponent(advice.courseId)}/advice/${encodeURIComponent(advice.id)}/report${page > 1 ? `?page=${page}` : ""}`}>Report this advice</Link></p>)}
   </article>)}</>;
 }

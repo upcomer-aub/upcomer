@@ -116,7 +116,7 @@ export async function publishAdvice(userId: string, input: PublishInput): Promis
   }
 }
 
-const adviceSelect = {
+export const adviceSelect = {
   id: true, courseId: true, authorId: true, isAnonymous: true, scopeKind: true, scopeLabel: true, fileId: true, termId: true, groupId: true,
   topic: true, title: true, body: true, resourceUrl: true, resourceTitle: true, editedAt: true, createdAt: true,
   author: { select: { name: true } },

@@ -4,6 +4,8 @@ import { AdviceForm } from "@/components/advice-form";
 import { AdviceList } from "@/components/advice-list";
 import { allowAdviceFeedRead, getAdviceOptions, searchAdvice } from "@/lib/advice";
 import { adviceChangeMessage } from "@/lib/advice-changes";
+import { adviceReportMessage } from "@/lib/advice-report-rules";
+import { getOpenReportedAdviceIds } from "@/lib/advice-reports";
 import { topicKeyOf } from "@/lib/advice-rules";
 import { getCurrentUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
@@ -14,11 +16,13 @@ type Params = {
   q?: string; topic?: string; examId?: string; termId?: string; page?: string;
   // Outcomes of editing or deleting one's own advice (US-36).
   edited?: string; unchanged?: string; deleted?: string; change_error?: string;
+  // Outcomes of reporting advice (US-43).
+  reported?: string; report_error?: string;
 };
 
 export default async function AdvicePage({ params, searchParams }: { params: Promise<{ courseId: string }>; searchParams: Promise<Params> }) {
   const { courseId } = await params;
-  const { q, topic, examId, termId, page, edited, unchanged, deleted, change_error: changeError } = await searchParams;
+  const { q, topic, examId, termId, page, edited, unchanged, deleted, change_error: changeError, reported, report_error: reportError } = await searchParams;
   const course = await getCourseById(courseId);
   if (!course) notFound();
   const user = await getCurrentUser();
@@ -29,6 +33,8 @@ export default async function AdvicePage({ params, searchParams }: { params: Pro
   }
   const filters = { query: q, topic, examId, termId, page: page ? Number(page) : undefined };
   const [result, options] = await Promise.all([searchAdvice(courseId, user?.id ?? null, filters), getAdviceOptions(courseId)]);
+  // Which advice on this page the viewer already reported (US-43); their own advice cannot be reported.
+  const reportedIds = user ? await getOpenReportedAdviceIds(user.id, result.items.filter(item => !item.isMine).map(item => item.id)) : new Set<string>();
   const filtered = Boolean(q?.trim() || topic || examId || termId);
   const base = `/courses/${courseId}/advice`;
   const link = (pageNumber: number) => {
@@ -59,8 +65,10 @@ export default async function AdvicePage({ params, searchParams }: { params: Pro
     {unchanged === "1" && <p className="notice" role="status">Nothing changed, so your advice was not updated.</p>}
     {deleted === "1" && <p className="notice" role="status">Your advice was deleted. Other students no longer see it.</p>}
     {changeError && <p className="notice" role="alert">{adviceChangeMessage(changeError)}</p>}
+    {reported === "1" && <p className="notice" role="status">Thanks, your report was sent. An admin will check the advice.</p>}
+    {reportError && <p className="notice" role="alert">{adviceReportMessage(reportError)}</p>}
     {filtered && <p className="muted"><Link href={base}>Clear search and filters</Link></p>}
-    <AdviceList items={result.items} page={result.page} emptyMessage={filtered ? "No advice matches your search." : "No advice has been published for this course yet. Be the first."} />
+    <AdviceList items={result.items} page={result.page} canReport={Boolean(user)} reported={reportedIds} emptyMessage={filtered ? "No advice matches your search." : "No advice has been published for this course yet. Be the first."} />
     {result.totalPages > 1 && <nav className="muted" aria-label="Pages">
       {result.page > 1 && <Link href={link(result.page - 1)}>← Previous</Link>}{" "}Page {result.page} of {result.totalPages}{" "}
       {result.page < result.totalPages && <Link href={link(result.page + 1)}>Next →</Link>}

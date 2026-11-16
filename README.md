@@ -460,6 +460,18 @@ After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One mi
 - **Tests:** `tests/unit/advice-changes.test.ts`, `tests/unit/advice-edit-page.test.tsx`, `tests/integration/advice-changes.test.ts`, `tests/e2e/advice-changes.spec.ts`, the two edit APIs in `npm run availability`, and `npm run load -- advice-edit`. Details: `ADVICE_CHANGES_REPORT.md`.
 - **Shared files changed:** `prisma/schema.prisma` (one column), the migration, `lib/advice.ts` (`editedAt` in the select, `PublicAdvice.edited`), `components/advice-list.tsx` (the edit link and "edited"), `app/courses/[courseId]/advice/page.tsx` (the notices), `lib/logger.ts` (five events), the advice unit test fixtures (`editedAt: null`), `tests/availability/run.ts`, `.env.example`, and `README.md`.
 
+### Reporting inappropriate advice (US-43, Mohammed Al-Haiqi, Sprint 4)
+
+After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One migration is new: `20261116000003_advice_reports` (the `AdviceReport` table and its two enums; nothing else changed).
+
+- **Reporting.** A logged-in student sees "Report this advice" on other students' posts in the feed. It opens `/courses/:courseId/advice/:adviceId/report`, which shows the post as students see it (an anonymous author stays anonymous) and asks what is wrong: offensive, spam or off-topic, personal information, academic dishonesty, or something else, with optional details (at most 500 characters). Only admins see reports; the author is never told who reported.
+- **Refused, saving nothing, with a message:** no reason or an unknown one, details that are too long, advice that is no longer shown (deleted by its author, removed by an admin, or unknown), the student's own advice (they can edit or delete it instead, US-36), and a second report while their first is still open. Two clicks at the same time wait for each other (`pg_advisory_xact_lock` per student and advice), so only one report is opened. The course is taken from the stored advice, never from the form.
+- **Feed:** advice the student already reported says "You reported this advice. An admin will check it." instead of the link (one indexed query per page, `getOpenReportedAdviceIds`).
+- **DoS:** `ADVICE_REPORT_RATE_LIMIT_PER_MINUTE` reports per student per minute (default 10).
+- **Logs and responsiveness:** `operation_timed` lines `advice_report`, `advice_reportable_read`, `advice_reported_read`, and the `advice_report_*` events. The note and the advice text are never logged.
+- **Tests:** `tests/unit/advice-reports.test.ts`, the report cases in `tests/unit/advice-feed-page.test.tsx`, `tests/integration/advice-reports.test.ts` (including a double-click race), `tests/e2e/advice-reports.spec.ts`, the report API in `npm run availability`, and `npm run load -- advice-report`. Details: `ADVICE_REPORTS_REPORT.md`.
+- **Shared files changed:** `prisma/schema.prisma` (the model, two enums, back-relations on `User`, `Course`, and `Advice`), the migration, `lib/advice.ts` (`adviceSelect` exported), `components/advice-list.tsx` (the report link), `app/courses/[courseId]/advice/page.tsx` (the notices), `lib/logger.ts` (four events), `tests/availability/run.ts`, `.env.example`, and `README.md`.
+
 ### Advice from previous students (US-34, US-35, US-37, US-39): open issues
 
 Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advice-rules.ts`), now owned by Mustafa Ergaibi. A review against the stories found no acceptance failure in the code: scopes are checked against the course, only `https://` links are accepted, an anonymous post never carries its author's name or ID to students, and search and filters stay inside the course. These issues are open and **not fixed yet**:
@@ -792,6 +804,9 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_edited`, `advice_deleted` | info | `adviceId`, `courseId`, `userId`, `hasLink` (edits); never the title, text, or link |
 | Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_change_refused`, `advice_change_rate_limited` | warn | `adviceId`, `userId`, `operation` (`edit`, `delete`), `reason` (`not_found`, `title_required`, `title_too_long`, `body_required`, `body_too_long`, `link_invalid`, `link_title_too_long`) or `retryAfterSeconds` |
 | Mohammed Al-Haiqi (Sprint 4, US-36) | `advice_change_failed` | error | `adviceId`, `userId`, `operation`, `errorType` |
+| Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_submitted` | info | `reportId`, `adviceId`, `courseId`, `category` (the reason), `userId`; never the note |
+| Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_refused`, `advice_report_rate_limited` | warn | `adviceId`, `userId`, `reason` (`invalid_reason`, `note_too_long`, `not_found`, `own_advice`, `duplicate`) or `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_failed` | error | `adviceId`, `userId`, `errorType` |
 
 ### What is never logged
 

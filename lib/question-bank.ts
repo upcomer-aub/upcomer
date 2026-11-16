@@ -1,6 +1,7 @@
 import { ExamType, FileCategory, type Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
+import { cleanExtractedQuestion, isUsableQuestion } from "@/lib/question-content";
 import { logError } from "@/lib/logger";
 
 import { groupCorrectedQuestions, LOW_CONFIDENCE_BELOW, normalizeQuestionText, rankGroups, type RankedGroup } from "@/lib/question-grouping";
@@ -42,12 +43,29 @@ function logGroupingDecisions(courseId: string, groups: RankedGroup[], questionC
 export async function regroupCourseInTransaction(tx: Prisma.TransactionClient, courseId: string) {
   // One rebuild per course at a time; a second one waits and then sees the first one's result.
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${courseId}))`;
-  const questions = await tx.question.findMany({
+  const questions = (await tx.question.findMany({
     where: { file: courseExams(courseId) },
-    select: { id: true, fileId: true, number: true, text: true, groupId: true, pinnedToQuestionId: true, splitOut: true, file: { select: { year: true } } },
-  });
+    select: { id: true, fileId: true, number: true, text: true, groupId: true, pinnedToQuestionId: true, splitOut: true, excludedFromBank: true, textCorrectedAt: true, file: { select: { year: true } } },
+  })).map(question => ({ ...question }));
 
-  const ranked = rankGroups(groupCorrectedQuestions(questions.map(({ id, fileId, number, text, pinnedToQuestionId, splitOut, file }) => ({ id, fileId, number, text, pinnedToQuestionId, splitOut, year: file.year }))));
+  // Repair legacy text without replacing question IDs, admin edits or historical outcomes.
+  for (const question of questions) {
+    if (question.excludedFromBank) continue;
+    // Remember definite non-questions, including empty labels, so paper counts can exclude them without hiding
+    // valid questions whose first grouping has not finished yet. Keep the original text available for review.
+    if (!isUsableQuestion(question)) {
+      await tx.question.update({ where: { id: question.id }, data: { excludedFromBank: true } });
+      question.excludedFromBank = true;
+      continue;
+    }
+    if (question.textCorrectedAt) continue;
+    const cleaned = cleanExtractedQuestion(question.text);
+    if (cleaned && cleaned !== question.text) {
+      await tx.question.update({ where: { id: question.id }, data: { text: cleaned } });
+      question.text = cleaned;
+    }
+  }
+  const ranked = rankGroups(groupCorrectedQuestions(questions.map(({ id, fileId, number, text, pinnedToQuestionId, splitOut, excludedFromBank, file }) => ({ id, fileId, number, text, pinnedToQuestionId, splitOut, excludedFromBank, year: file.year }))));
 
 
   await tx.questionGroup.deleteMany({ where: { courseId, normalizedText: { notIn: ranked.map(group => group.normalizedText) } } });
@@ -123,7 +141,7 @@ const groupInclude = {
     // Defense in depth: the rebuild never groups an unpublished paper's questions (US-13).
     where: { file: PUBLISHED_FILES },
     select: {
-      id: true, number: true, text: true, fileId: true,
+      id: true, number: true, text: true, fileId: true, excludedFromBank: true,
       file: { select: { id: true, title: true, year: true, examType: true, term: { select: { id: true, name: true } }, professor: { select: { id: true, name: true } } } },
     },
     orderBy: [{ fileId: "asc" }, { number: "asc" }],
@@ -161,7 +179,7 @@ export async function getQuestionBank(courseId: string, filters: QuestionBankFil
   const filtered = Boolean(query) || Object.keys(paperFilter).length > 0;
   try {
     const [totalPapers, rows] = await Promise.all([
-      db.courseFile.count({ where: { ...courseExams(courseId), questions: { some: {} } } }),
+      db.courseFile.count({ where: { ...courseExams(courseId), questions: { some: { excludedFromBank: false } } } }),
       db.questionGroup.findMany({
         // A group left with no questions (its papers were deleted) is skipped until the next rebuild.
         // One paper has to match every filter, so "2024" and "Final" means a 2024 final, not a 2024 midterm plus a final.
@@ -174,8 +192,10 @@ export async function getQuestionBank(courseId: string, filters: QuestionBankFil
     const keyword = normalizeQuestionText(query);
     const matches = (group: GroupRow) => !keyword || group.normalizedText.includes(keyword)
       || group.questions.some(question => normalizeQuestionText(question.text).includes(keyword));
-    const groups = rows.filter(matches).map((group): QuestionBankGroup => ({
-      id: group.id, rank: group.rank, text: group.text, paperCount: group.paperCount, course: group.course,
+    // Protect old groups even before the admin has run cleanup/regroup.
+    const usable = rows.map(group => ({ ...group, questions: group.questions.filter(isUsableQuestion) })).filter(group => group.questions.length);
+    const groups = usable.filter(matches).map((group): QuestionBankGroup => ({
+      id: group.id, rank: group.rank, text: cleanExtractedQuestion(group.text) || cleanExtractedQuestion(group.questions[0].text), paperCount: papersOf(group).length, course: group.course,
       questions: group.questions.map(({ id, number, text, fileId }) => ({ id, number, text, fileId })),
       papers: papersOf(group),
     }));
@@ -193,7 +213,7 @@ export async function getQuestionBank(courseId: string, filters: QuestionBankFil
 export async function getQuestionBankFilterOptions(courseId: string) {
   try {
     const papers = await db.courseFile.findMany({
-      where: { ...courseExams(courseId), questions: { some: {} } },
+      where: { ...courseExams(courseId), questions: { some: { excludedFromBank: false } } },
       select: { year: true, examType: true, term: { select: { id: true, name: true } }, professor: { select: { id: true, name: true } } },
     });
     const unique = <T extends { id: string; name: string }>(items: Array<T | null>) =>

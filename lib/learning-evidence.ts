@@ -1,3 +1,4 @@
+import { isUsableQuestion } from "@/lib/question-content";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { NEUTRAL_WEAKNESS, questionTopic, topicKey } from "@/lib/learning-profile";
@@ -42,21 +43,21 @@ export async function recordLearningEvents(userId: string, courseId: string, eve
         let generatedQuestionId: string | undefined;
         if (event.questionId) {
           const question = await tx.question.findFirst({
-            where: { id: event.questionId, file: { courseId, category: "EXAM", ...PUBLISHED_FILES } },
-            include: { file: true, group: { include: { questions: { where: { file: { courseId, category: "EXAM", ...PUBLISHED_FILES } }, include: { file: true }, orderBy: [{ file: { year: "desc" } }, { file: { createdAt: "desc" } }, { id: "asc" }] } } } },
+            where: { id: event.questionId, excludedFromBank: false, file: { courseId, category: "EXAM", ...PUBLISHED_FILES } },
+            include: { file: true, group: { include: { questions: { where: { excludedFromBank: false, file: { courseId, category: "EXAM", ...PUBLISHED_FILES } }, include: { file: true }, orderBy: [{ file: { year: "desc" } }, { file: { createdAt: "desc" } }, { id: "asc" }] } } } },
           });
-          if (!question) throw new EvidenceRefusal("not_found");
-          const papers = new Map((question.group?.questions ?? [question]).map(item => [item.file.id, item.file]));
+          if (!question || !isUsableQuestion(question)) throw new EvidenceRefusal("not_found");
+          const papers = new Map((question.group?.questions ?? [question]).filter(isUsableQuestion).map(item => [item.file.id, item.file]));
           // Match question-bank papersOf exactly: topic ties must update the topic named by personal-order rationale.
           const orderedPapers = [...papers.values()].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title) || (a.id < b.id ? -1 : 1));
           topic = questionTopic(orderedPapers)?.topic ?? "";
           questionId = question.id;
         } else if (event.generatedQuestionId) {
           const generated = await tx.generatedPracticeQuestion.findFirst({
-            where: { id: event.generatedQuestionId, userId, courseId, sourceQuestion: { file: { courseId, category: "EXAM", ...PUBLISHED_FILES } } },
+            where: { id: event.generatedQuestionId, userId, courseId, sourceQuestion: { excludedFromBank: false, groupId: { not: null }, file: { courseId, category: "EXAM", ...PUBLISHED_FILES } } },
             include: { sourceQuestion: { include: { file: { select: { topic: true } } } } },
           });
-          if (!generated || generated.sourceFingerprint !== sourceFingerprint(generated.sourceQuestion.text) || generated.topicKey !== topicKey(generated.sourceQuestion.file.topic)) throw new EvidenceRefusal("not_found");
+          if (!generated || !isUsableQuestion(generated.sourceQuestion) || generated.sourceFingerprint !== sourceFingerprint(generated.sourceQuestion.text) || generated.topicKey !== topicKey(generated.sourceQuestion.file.topic)) throw new EvidenceRefusal("not_found");
           topic = generated.topic;
           generatedQuestionId = generated.id;
         } else if (!["FLASHCARD", "AI_INTERACTION"].includes(event.source)) throw new EvidenceRefusal("not_found");

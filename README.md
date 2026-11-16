@@ -992,3 +992,16 @@ When at least `ALERT_THRESHOLD` error-level events (default 5) occur within `ALE
 2. Open http://localhost:3000/admin/monitoring as the admin. The banner shows "Alert: 5 errors in the last 10 minutes", and the entries show `physical_file_not_found` with `fileId=file-missing`.
 
 Tests are in `tests/unit/logger.test.ts`, `tests/unit/log-store.test.ts`, `tests/unit/monitoring-page.test.tsx`, and `tests/e2e/admin-monitoring.spec.ts`.
+
+
+### Filtering exam instructions from question rankings
+
+After updating, run `npx prisma generate` and `npx prisma migrate deploy` against the intended database. Migration `20261120000000_question_exclusions` adds a persistent question exclusion flag and two correction audit kinds; it does not delete any existing source records.
+
+Extraction and grouping share conservative content checks in `lib/question-content.ts`. Complete open/closed-book rules, permitted-material rules, exam duration/name fields, standard instruction headings and recognized footer lines are removed, including wrapped rules. Legitimate tasks do not need a question mark; task text that merely mentions an exam policy is retained. Ambiguous text is kept and flagged for admin review rather than automatically rejected.
+
+To clean existing papers, open **Admin > Question Bank** and click **Regroup and rank** for the affected course. This removes recognized boilerplate from uncorrected text and rebuilds groups/counts/ranks while retaining source question IDs, admin-edited text, correction logs and learning history. Definite non-questions are automatically marked excluded during regrouping; their original text is retained. Instruction-only rows remain available in **Correct questions > Excluded and ungrouped entries**. Student question-bank reads also suppress known instruction-only and excluded entries before cleanup runs. After regrouping, papers with no usable questions no longer contribute to the frequency denominator. Valid papers awaiting their first grouping still show the preparation state instead of disappearing.
+
+On a question's correction page, **Exclude: not a question** removes that source entry from rankings, new practice generation and new learning evidence. **Restore entry** reverses the exclusion; automatic content validation still applies. Each action requires an admin session and is recorded in the correction history. Exclusion survives ordinary regrouping and reprocessing. Other copies of the text in other papers remain separate source entries and can be excluded individually; recognized boilerplate is suppressed in every paper automatically. Existing mock-exam snapshots and past learning outcomes are preserved.
+
+Generated libraries reject excluded, ungrouped or otherwise invalid sources. This is a rules-based filter, so unfamiliar boilerplate may still need admin review. No shared database cleanup is performed by installing the code alone.

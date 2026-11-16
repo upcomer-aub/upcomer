@@ -124,11 +124,11 @@ test("question text and paper titles are shown as text, never run as HTML", asyn
   expect(tooWide, "elements wider than the exam content at 375px").toEqual([]);
 });
 
-// The reference: Y is the course's exam papers with at least one question; each stored group, in rank order, shows once with
+// The reference: Y is the course's exam papers with at least one non-excluded source entry; each stored group, in rank order, shows once with
 // X = its distinct papers among those, and is left out when it has none. Tiers by the share rule, the note under 5 papers.
 async function expected(courseId: string) {
-  const papers = new Set((await db.courseFile.findMany({ where: { courseId, category: "EXAM", questions: { some: {} } }, select: { id: true } })).map(item => item.id));
-  const groups = await db.questionGroup.findMany({ where: { courseId, questions: { some: {} } }, orderBy: { rank: "asc" }, include: { questions: { select: { fileId: true } } } });
+  const papers = new Set((await db.courseFile.findMany({ where: { courseId, category: "EXAM", questions: { some: { excludedFromBank: false } } }, select: { id: true } })).map(item => item.id));
+  const groups = await db.questionGroup.findMany({ where: { courseId, questions: { some: { excludedFromBank: false } } }, orderBy: { rank: "asc" }, include: { questions: { where: { excludedFromBank: false }, select: { fileId: true } } } });
   const questions = groups
     .map(group => ({ key: group.normalizedText, papers: [...new Set(group.questions.map(item => item.fileId).filter(id => papers.has(id)))].sort() }))
     .filter(item => item.papers.length)

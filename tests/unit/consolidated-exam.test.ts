@@ -57,7 +57,7 @@ describe("getConsolidatedExam", () => {
     expect(exam.questions.map(question => [question.position, question.rank, question.id])).toEqual([[1, 1, "g1"], [2, 2, "g2"], [3, 3, "g3"]]);
     expect(new Set(exam.questions.map(question => question.id)).size).toBe(exam.questions.length);
     expect(mocks.findGroups).toHaveBeenCalledWith(expect.objectContaining({ where: { courseId: course.id, questions: { some: { file: { status: "PUBLISHED" } } } }, orderBy: { rank: "asc" } }));
-    expect(mocks.findFiles).toHaveBeenCalledWith({ where: { courseId: course.id, category: "EXAM", status: "PUBLISHED", questions: { some: {} } }, select: { id: true } });
+    expect(mocks.findFiles).toHaveBeenCalledWith({ where: { courseId: course.id, category: "EXAM", status: "PUBLISHED", questions: { some: { excludedFromBank: false } } }, select: { id: true } });
   });
   it("never lets a pending or rejected submission change X, Y, or the questions (US-13)", async () => {
     const before = await getConsolidatedExam(course.id);

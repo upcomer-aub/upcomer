@@ -5,3 +5,14 @@
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1.25rem; }
 .actions button { margin-top: 0; }
 .actions p { flex: 1 1 100%; margin: 0; }
+/* The countdown of a timed exam (US-48): stays in view while the student scrolls through the questions. */
+.timer { position: sticky; top: .5rem; z-index: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem 1rem; margin: 1rem 0; border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius-small); background: var(--surface); padding: .6rem .9rem; }
+.timer p { margin: 0; }
+.clock { font-weight: 600; }
+.clock strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.timer[data-level="warning"] { border-color: var(--warn-text); border-left-color: var(--warn-text); background: var(--warn-bg); }
+.timer[data-level="warning"] .clock { color: var(--warn-text); }
+.timer[data-level="urgent"] { border-color: var(--danger-border); border-left-color: var(--danger-text); background: var(--danger-bg); }
+.timer[data-level="urgent"] .clock { color: var(--danger-text); }
+.problem { color: var(--danger-text); font-weight: 600; }
+.hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

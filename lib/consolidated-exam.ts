@@ -5,6 +5,7 @@ import { isLowConfidence, tierFor, type LikelihoodTier } from "@/lib/likelihood-
 import { logError } from "@/lib/logger";
 import { sourceQuestionOf } from "@/lib/mock-exam-rules";
 import { getQuestionBank, type QuestionBankGroup } from "@/lib/question-bank";
+import { cleanExtractedQuestion } from "@/lib/question-content";
 import { cleanQuestionText } from "@/lib/question-grouping";
 
 // The consolidated ordered exam of a course (US-18): every distinct question once, in ranking order, with its repetition
@@ -37,7 +38,7 @@ export type ConsolidatedExam = { totalPapers: number; lowConfidence: boolean; qu
 // The question as written, without its number or marks, keeping the line breaks between its sub-parts. Spacing inside a
 // line is tidied and empty lines are dropped. A first line that is only a number ("Question 3") is dropped too.
 export function fullQuestionText(text: string) {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n").map(line => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const lines = cleanExtractedQuestion(text).split("\n").map(line => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (!lines.length) return "";
   lines[0] = cleanQuestionText(lines[0]);
   return lines.filter(Boolean).join("\n");
@@ -77,7 +78,7 @@ export async function getConsolidatedExam(courseId: string): Promise<Consolidate
   const [bank, coursePapers] = await Promise.all([
     getQuestionBank(courseId),
     // Only published papers count (US-13): a pending or rejected submission never changes X or Y.
-    db.courseFile.findMany({ where: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES, questions: { some: {} } }, select: { id: true } }).catch(error => {
+    db.courseFile.findMany({ where: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES, questions: { some: { excludedFromBank: false } } }, select: { id: true } }).catch(error => {
       logError("question_bank_retrieval_failed", { courseId, source: "consolidated_exam", errorType: errorType(error) });
       throw error;
     }),

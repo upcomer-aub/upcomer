@@ -3,10 +3,13 @@
 export const MAX_QUESTION_TEXT_LENGTH = 2000;
 
 export type CorrectionRefusal =
+  | "already_excluded" | "not_excluded"
   | "not_found" | "group_not_found" | "same_group" | "already_split" | "not_corrected"
   | "text_required" | "text_too_long" | "text_unchanged" | "stale" | "rate_limited" | "unexpected";
 
 const MESSAGES: Record<CorrectionRefusal, string> = {
+  already_excluded: "This entry is already excluded.",
+  not_excluded: "This entry is not excluded.",
   not_found: "That question doesn't exist anymore.",
   group_not_found: "That group doesn't exist anymore. The questions may have been regrouped; pick the group again.",
   same_group: "The question is already in that group.",
@@ -24,6 +27,8 @@ const MESSAGES: Record<CorrectionRefusal, string> = {
 export const correctionMessage = (error: string) => (Object.hasOwn(MESSAGES, error) ? MESSAGES[error as CorrectionRefusal] : MESSAGES.unexpected);
 
 export const SAVED_MESSAGES = {
+  exclude: "Entry excluded from rankings and practice. Its source and history are preserved.",
+  restore: "Exclusion removed. The entry will be grouped again if it contains usable question text.",
   edit: "Text corrected. Students see the new text.",
   move: "Question moved. The counts and ranking are updated.",
   split: "Question split into a group of its own. The counts and ranking are updated.",
@@ -37,4 +42,4 @@ export const REGROUP_FAILED_MESSAGE = "The correction was saved, but the questio
 export const normalizeLineEndings = (text: string) => text.replace(/\r\n?/g, "\n");
 export const cleanCorrectedText = (text: string) => normalizeLineEndings(text).trim();
 
-export const KIND_LABELS = { EDIT_TEXT: "Text corrected", MOVE: "Moved to another group", SPLIT: "Split into its own group", RESET: "Grouped by its text again" } as const;
+export const KIND_LABELS = { EXCLUDE: "Excluded as not a question", RESTORE: "Exclusion removed", EDIT_TEXT: "Text corrected", MOVE: "Moved to another group", SPLIT: "Split into its own group", RESET: "Grouped by its text again" } as const;

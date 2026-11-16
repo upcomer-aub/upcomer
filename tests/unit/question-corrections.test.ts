@@ -14,7 +14,7 @@ vi.mock("@/lib/auth", () => ({ requireAdmin }));
 vi.mock("next/navigation", () => ({ redirect }));
 import { correctQuestion } from "@/lib/question-corrections";
 import { cleanCorrectedText, correctionMessage, savedMessage } from "@/lib/question-correction-rules";
-import { editQuestionTextAction, moveQuestionAction, resetQuestionGroupAction, splitQuestionAction } from "@/lib/question-correction-actions";
+import { excludeQuestionAction, restoreQuestionAction, editQuestionTextAction, moveQuestionAction, resetQuestionGroupAction, splitQuestionAction } from "@/lib/question-correction-actions";
 import { resetRateLimits } from "@/lib/rate-limit";
 
 const form = (fields: Record<string, string>) => {
@@ -86,6 +86,8 @@ describe("question correction actions", () => {
     [moveQuestionAction, { ...ids, groupId: "g-2" }, "saved=move"],
     [splitQuestionAction, ids, "saved=split"],
     [resetQuestionGroupAction, ids, "saved=reset"],
+    [excludeQuestionAction, ids, "saved=exclude"],
+    [restoreQuestionAction, ids, "saved=restore"],
   ] as const)("checks the admin, corrects, and returns to the question (%#)", async (action, fields, outcome) => {
     await expect(action(form(fields))).rejects.toThrow(`NEXT_REDIRECT ${route}?${outcome}`);
     expect(requireAdmin).toHaveBeenCalledWith(route);

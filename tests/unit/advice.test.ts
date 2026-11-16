@@ -11,7 +11,7 @@ vi.mock("@/lib/logger", () => ({ logError: vi.fn(), errorCode: (error: unknown) 
 vi.mock("@/lib/rate-limit", () => ({ checkRateLimit: vi.fn(() => ({ ok: true })), limitFromEnv: (_name: string, fallback: number) => fallback }));
 
 import { checkRateLimit } from "@/lib/rate-limit";
-import { publishAdvice, searchAdvice, toPublicAdvice, type AdviceRow, type PublishInput } from "@/lib/advice";
+import { publishAdvice, resetAdviceCache, searchAdvice, toPublicAdvice, type AdviceRow, type PublishInput } from "@/lib/advice";
 
 const COURSE = { id: "course-1", code: "CS101" };
 
@@ -22,11 +22,12 @@ const input = (over: Partial<PublishInput> = {}): PublishInput => ({
 
 const row = (over: Partial<AdviceRow> = {}): AdviceRow => ({
   id: "advice-1", courseId: COURSE.id, authorId: "author-secret-id", isAnonymous: false, scopeKind: "COURSE", scopeLabel: "CS101",
-  fileId: null, termId: null, groupId: null, topic: null, title: "Title", body: "Body", resourceUrl: null, resourceTitle: null,
+  fileId: null, termId: null, groupId: null, topic: null, title: "Title", body: "Body", resourceUrl: null, resourceTitle: null, editedAt: null,
   createdAt: new Date("2026-11-02T10:00:00Z"), author: { name: "Real Author Name" }, ...over,
 });
 
 beforeEach(() => {
+  resetAdviceCache();
   vi.clearAllMocks();
   db.course.findUnique.mockResolvedValue(COURSE);
   db.advice.create.mockResolvedValue({ id: "advice-1" });

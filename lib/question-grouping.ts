@@ -1,3 +1,5 @@
+import { cleanExtractedQuestion, isUsableQuestion } from "@/lib/question-content";
+
 // Pure grouping (US-15a, US-15b) and ranking (US-16) of a course's extracted questions. No database access, so the same
 // input always gives the same groups in the same order.
 
@@ -254,7 +256,9 @@ export function groupQuestions(questions: SourceQuestion[]): GroupedQuestions[] 
   const groups: GroupedQuestions[] = [];
   const byKey = new Map<string, GroupedQuestions>();
   const featuresOf = new Map<GroupedQuestions, QuestionFeatures>();
-  for (const question of [...questions].sort(byPaperThenPosition)) {
+  for (const original of [...questions].sort(byPaperThenPosition)) {
+    if (!isUsableQuestion(original)) continue;
+    const question = { ...original, text: cleanExtractedQuestion(original.text) };
     const key = normalizeQuestionText(question.text);
     if (!key) continue;
     let group = byKey.get(key) ?? groups.find(candidate => isNearIdentical(candidate.normalizedText, key));
@@ -283,12 +287,13 @@ export function groupQuestions(questions: SourceQuestion[]): GroupedQuestions[] 
 // Admin corrections (question corrections) on top of the automatic grouping. A question pinned to another one joins the group
 // that question ends up in, wherever its text would put it; a split question gets a group of its own that nothing else joins.
 // A pin to a question that is gone (deleted, or its paper moved to another course) or a loop of pins counts as no pin.
-export type CorrectedQuestion = SourceQuestion & { pinnedToQuestionId?: string | null; splitOut?: boolean };
+export type CorrectedQuestion = SourceQuestion & { pinnedToQuestionId?: string | null; splitOut?: boolean; excludedFromBank?: boolean };
 
 // The group key of a split question. Grouping keys never contain ":" (it is removed as punctuation), so this one is unique.
 export const splitGroupKey = (normalizedText: string, questionId: string) => `${normalizedText} #split:${questionId}`;
 
-export function groupCorrectedQuestions(questions: CorrectedQuestion[]): GroupedQuestions[] {
+export function groupCorrectedQuestions(input: CorrectedQuestion[]): GroupedQuestions[] {
+  const questions = input.filter(isUsableQuestion).map(question => ({ ...question, text: cleanExtractedQuestion(question.text) }));
   const byId = new Map(questions.map(question => [question.id, question]));
   const keyOf = (question: CorrectedQuestion) => normalizeQuestionText(question.text);
   // The question a pin chain ends at: a split question, an unpinned one, or the last one before a missing anchor or a loop.

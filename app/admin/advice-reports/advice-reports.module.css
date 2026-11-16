@@ -1,0 +1,33 @@
+/* The advice as its author wrote it, line breaks kept. */
+.body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.decisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+}
+
+/* Removing takes the advice down for every student, so its button looks different from keeping it. */
+.remove {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+.remove:hover {
+  background: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.keep {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.keep:hover {
+  background: var(--surface-muted, transparent);
+  color: var(--text);
+}

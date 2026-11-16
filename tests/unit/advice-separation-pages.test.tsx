@@ -20,7 +20,7 @@ vi.mock("@/lib/question-bank", async importOriginal => ({
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser, requireUser: vi.fn() }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
-vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions }));
+vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: () => true }));
 vi.mock("@/lib/advice-votes", () => ({ getHelpfulCounts: mocks.getHelpfulCounts }));
 vi.mock("@/lib/advice-comments", () => ({ getAdviceComments: vi.fn(async () => new Map()) }));
 vi.mock("@/lib/advice-comment-actions", () => ({ addAdviceCommentAction: vi.fn(), deleteAdviceCommentAction: vi.fn() }));
@@ -33,6 +33,7 @@ vi.mock("@/lib/question-progress-actions", () => ({ markQuestionAction: vi.fn() 
 vi.mock("@/lib/question-report-actions", () => ({ reportQuestionAction: vi.fn() }));
 vi.mock("@/lib/my-courses-actions", () => ({ addCourseAction: vi.fn() }));
 import CoursePage from "@/app/courses/[courseId]/page";
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 import ConsolidatedExamPage from "@/app/courses/[courseId]/exam/page";
 import QuestionBankPage from "@/app/courses/[courseId]/questions/page";
@@ -48,7 +49,7 @@ const exam: ConsolidatedExam = { totalPapers: 2, lowConfidence: false, questions
 const advice = (id: string): PublicAdvice => ({
   id, courseId: course.id, title: `Title ${id}`, body: "Body", resourceUrl: null, resourceTitle: null,
   scope: { kind: "COURSE", label: "EECE350", fileId: null, termId: null, groupId: null, topic: null },
-  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, createdAt: new Date("2026-11-02T00:00:00Z"),
+  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, edited: false, createdAt: new Date("2026-11-02T00:00:00Z"),
 });
 const opinionTag = `data-source="opinion">${SOURCE_LABELS.opinion.tag}</span>`;
 const statisticsTag = `data-source="statistics">${SOURCE_LABELS.statistics.tag}</span>`;

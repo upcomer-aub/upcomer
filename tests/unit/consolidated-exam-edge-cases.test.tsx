@@ -105,9 +105,9 @@ describe("getConsolidatedExam on random courses", () => {
     const groups = Array.from({ length: papers.length ? rng.int(0, 25) : 0 }, (_, index) => {
       const sources = Array.from({ length: rng.int(1, 6) }, (__, number) => ({ paper: rng.pick(papers), number }));
       return {
-        id: `g${index}`, rank: 0, text: `Question ${index}`, normalizedText: `question ${index}`, paperCount: new Set(sources.map(item => item.paper.id)).size,
+        id: `g${index}`, rank: 0, text: `Explain networking concept ${index}`, normalizedText: `question ${index}`, paperCount: new Set(sources.map(item => item.paper.id)).size,
         courseId: "c", course: { id: "c", code: "C1", name: "Course" },
-        questions: sources.map(({ paper, number }, position) => ({ id: `g${index}q${position}`, number, text: rng.chance(0.2) ? `${number}. Part one\n(a) part two` : `Question ${index}`, fileId: paper.id, file: paper })),
+        questions: sources.map(({ paper, number }, position) => ({ id: `g${index}q${position}`, number, text: rng.chance(0.2) ? `${number}. Part one\n(a) part two` : `Explain networking concept ${index}`, fileId: paper.id, file: paper })),
       };
     });
     // Ranked like the real bank: most papers first. The database returns them in rank order.

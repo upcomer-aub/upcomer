@@ -1,0 +1,3 @@
+ALTER TABLE "Question" ADD COLUMN "excludedFromBank" BOOLEAN NOT NULL DEFAULT false;
+ALTER TYPE "CorrectionKind" ADD VALUE 'EXCLUDE';
+ALTER TYPE "CorrectionKind" ADD VALUE 'RESTORE';

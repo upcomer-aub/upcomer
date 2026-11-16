@@ -1,21 +1,22 @@
 import { describe, expect, it } from "vitest";
-import {
-  complexityOf, mockExamMessage, parseMockExamConfig, selectMockQuestions, type MockConfig, type PoolQuestion,
-} from "@/lib/mock-exam-rules";
+import { selectMockQuestions } from "@/lib/mock-exam-mix";
+import { complexityOf, mockExamMessage, parseMockExamConfig, type MockConfig, type PoolQuestion } from "@/lib/mock-exam-rules";
 
 const question = (index: number, over: Partial<PoolQuestion> = {}): PoolQuestion => ({
-  id: `g${index}`, position: index, text: "x".repeat(index * 10), paperCount: 1, totalPapers: 2,
+  id: `g${index}`, position: index, text: "x".repeat(index * 10), paperCount: 1, totalPapers: 8,
   topicKey: index <= 4 ? "networking" : "databases", topic: index <= 4 ? "Networking" : "Databases", papers: [{ title: `Paper ${index}`, year: 2025 }], ...over,
 });
 // Eight questions, from the simplest (g1) to the most complex (g8); g1-g4 are Networking, g5-g8 Databases.
 const pool = Array.from({ length: 8 }, (_, index) => question(index + 1));
+// The same eight questions in one topic: since US-47 the difficulty chooses inside each topic, so this tests it alone.
+const single = pool.map(item => ({ ...item, topicKey: "networking", topic: "Networking" }));
 const config = (over: Partial<MockConfig> = {}): MockConfig => ({ topicKeys: [], length: 3, difficulty: "MIXED", ...over });
 const ids = (result: ReturnType<typeof selectMockQuestions>) => (result.ok ? result.questions.map(item => item.id) : []);
 
 describe("parseMockExamConfig (US-45)", () => {
   it("accepts valid settings and tidies them", () => {
     expect(parseMockExamConfig({ length: " 10 ", difficulty: "hard", topics: [" TCP  Basics ", "tcp basics", ""] })).toEqual({
-      ok: true, config: { topicKeys: ["tcp basics"], length: 10, difficulty: "HARD", includeGenerated: false },
+      ok: true, config: { topicKeys: ["tcp basics"], length: 10, difficulty: "HARD", includeGenerated: false }, timeLimitMinutes: null,
     });
     // Generated practice questions are only asked for with a real `true`.
     expect(parseMockExamConfig({ length: "10", difficulty: "HARD", topics: [], includeGenerated: true })).toMatchObject({ config: { includeGenerated: true } });
@@ -71,26 +72,45 @@ describe("selectMockQuestions (US-45)", () => {
     expect(selectMockQuestions(pool, config({ topicKeys: ["databases", "quantum"] }))).toMatchObject({ ok: false, error: "topic_invalid" });
   });
 
-  it("says how many questions match when there are too few", () => {
-    expect(selectMockQuestions(pool, config({ topicKeys: ["databases"], length: 5 }))).toEqual({ ok: false, error: "not_enough_questions", available: 4 });
+  it("builds the largest valid exam when the topics cannot fill the request, keeping the topics and the difficulty", () => {
+    for (const difficulty of ["EASY", "MEDIUM", "HARD", "MIXED"] as const) {
+      const result = selectMockQuestions(pool, config({ topicKeys: ["databases"], length: 5, difficulty }));
+      expect(result).toMatchObject({ ok: true, requested: 5, length: 4, narrowed: false });
+      expect(ids(result)).toEqual(["g5", "g6", "g7", "g8"]);
+    }
+    expect(selectMockQuestions(pool, config({ length: 50 }))).toMatchObject({ ok: true, requested: 50, length: 8 });
+    expect(selectMockQuestions(pool, config({ length: 8 }))).toMatchObject({ ok: true, requested: 8, length: 8 });
+  });
+
+  it("refuses only when nothing at all matches", () => {
     expect(selectMockQuestions([], config())).toEqual({ ok: false, error: "not_enough_questions", available: 0 });
+    const all = new Set(pool.map(item => item.id));
+    expect(selectMockQuestions(pool, config({ topicKeys: ["databases"] }), { exclude: all })).toEqual({ ok: false, error: "not_enough_questions", available: 0 });
+    // One question left is still an exam.
+    expect(selectMockQuestions(pool, config({ length: 5 }), { exclude: new Set([...all].filter(id => id !== "g3")) })).toMatchObject({ ok: true, length: 1 });
   });
 
   it("picks easier questions for EASY than for HARD, with MEDIUM in between", () => {
     const score = (difficulty: "EASY" | "MEDIUM" | "HARD") => {
-      const result = selectMockQuestions(pool, config({ difficulty }));
+      const result = selectMockQuestions(single, config({ difficulty }));
       return result.ok ? result.questions.map(item => complexityOf(item.text)) : [];
     };
     expect(Math.max(...score("EASY"))).toBeLessThanOrEqual(Math.min(...score("HARD")));
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "EASY" })))).toEqual(["g1", "g2", "g3"]);
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "HARD" })))).toEqual(["g6", "g7", "g8"]);
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "MEDIUM" })))).toEqual(["g3", "g4", "g5"]);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "EASY" })))).toEqual(["g1", "g2", "g3"]);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "HARD" })))).toEqual(["g6", "g7", "g8"]);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "MEDIUM" })))).toEqual(["g3", "g4", "g5"]);
+  });
+
+  it("applies the difficulty inside each topic", () => {
+    // Two topics of equal weight share three slots 2 and 1; each takes its simplest (EASY) or most complex (HARD).
+    expect(ids(selectMockQuestions(pool, config({ difficulty: "EASY" })))).toEqual(["g1", "g5", "g6"]);
+    expect(ids(selectMockQuestions(pool, config({ difficulty: "HARD" })))).toEqual(["g4", "g7", "g8"]);
   });
 
   it("spreads MIXED over the whole range, from the simplest to the most complex", () => {
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "MIXED", length: 3 })))).toEqual(["g1", "g5", "g8"]);
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "MIXED", length: 1 }))).length).toBe(1);
-    expect(ids(selectMockQuestions(pool, config({ difficulty: "MIXED", length: 8 })))).toHaveLength(8);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "MIXED", length: 3 })))).toEqual(["g1", "g5", "g8"]);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "MIXED", length: 1 }))).length).toBe(1);
+    expect(ids(selectMockQuestions(single, config({ difficulty: "MIXED", length: 8 })))).toHaveLength(8);
   });
 
   it("gives the same exam whatever order the pool comes in", () => {
@@ -117,6 +137,7 @@ describe("mockExamMessage", () => {
   it("says how many questions are available", () => {
     expect(mockExamMessage("not_enough_questions", 4)).toContain("Only 4 questions");
     expect(mockExamMessage("not_enough_questions", 1)).toContain("Choose more topics");
+    expect(mockExamMessage("not_enough_questions", 0)).toBe("No question matches your topics, so a mock exam can't be made. Choose more topics.");
   });
 
   it("never echoes an unknown value", () => {

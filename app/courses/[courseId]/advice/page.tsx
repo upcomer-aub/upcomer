@@ -2,8 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdviceForm } from "@/components/advice-form";
 import { AdviceList } from "@/components/advice-list";
+import { allowAdviceFeedRead, getAdviceOptions, searchAdvice } from "@/lib/advice";
+import { adviceChangeMessage } from "@/lib/advice-changes";
+import { adviceReportMessage } from "@/lib/advice-report-rules";
+import { getOpenReportedAdviceIds } from "@/lib/advice-reports";
 import { SourceLabel } from "@/components/source-label";
-import { getAdviceOptions, searchAdvice } from "@/lib/advice";
 import { topicKeyOf } from "@/lib/advice-rules";
 import { getCurrentUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
@@ -16,20 +19,30 @@ import styles from "./advice-page.module.css";
 export const dynamic = "force-dynamic";
 
 type Params = {
-  q?: string; topic?: string; examId?: string; termId?: string; page?: string; sort?: string; helpful?: string; helpful_error?: string;
-  thread?: string; comment?: string; comment_error?: string;
+  q?: string; topic?: string; examId?: string; termId?: string; page?: string;
+  // Outcomes of editing or deleting one's own advice (US-36).
+  edited?: string; unchanged?: string; deleted?: string; change_error?: string;
+  // Outcomes of reporting advice (US-43).
+  reported?: string; report_error?: string;
+  sort?: string; helpful?: string; helpful_error?: string; thread?: string; comment?: string; comment_error?: string;
 };
 
 export default async function AdvicePage({ params, searchParams }: { params: Promise<{ courseId: string }>; searchParams: Promise<Params> }) {
   const { courseId } = await params;
-  const { q, topic, examId, termId, page, helpful, helpful_error: helpfulError, thread, comment, comment_error: commentError, ...rest } = await searchParams;
-  // US-40: newest first unless "Most helpful" is chosen; any other value is ignored.
-  const sort = parseAdviceSort(rest.sort);
+  const { q, topic, examId, termId, page, edited, unchanged, deleted, change_error: changeError, reported, report_error: reportError, helpful, helpful_error: helpfulError, thread, comment, comment_error: commentError, sort: rawSort } = await searchParams;
   const course = await getCourseById(courseId);
   if (!course) notFound();
   const user = await getCurrentUser();
+  // DoS protection (US-38): a student over the read limit gets a message and nothing is read from the database.
+  if (user && !allowAdviceFeedRead(user.id)) {
+    return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Advice from previous students</h1>
+      <p className="notice" role="alert">You are opening advice pages too quickly. Wait a minute and try again.</p></>;
+  }
+  const sort = parseAdviceSort(rawSort);
   const filters = { query: q, topic, examId, termId, page: page ? Number(page) : undefined, sort };
   const [result, options] = await Promise.all([searchAdvice(courseId, user?.id ?? null, filters), getAdviceOptions(courseId)]);
+  // Which advice on this page the viewer already reported (US-43); their own advice cannot be reported.
+  const reportedIds = user ? await getOpenReportedAdviceIds(user.id, result.items.filter(item => !item.isMine).map(item => item.id)) : new Set<string>();
   const adviceIds = result.items.map(item => item.id);
   // US-41: the replies of the shown advice only, read for the session user (their own replies and, for an admin, every reply
   // get a Delete button).
@@ -71,6 +84,12 @@ export default async function AdvicePage({ params, searchParams }: { params: Pro
       </select>
       <button className="button" type="submit">Search</button>
     </form>
+    {edited === "1" && <p className="notice" role="status">Your advice was updated.</p>}
+    {unchanged === "1" && <p className="notice" role="status">Nothing changed, so your advice was not updated.</p>}
+    {deleted === "1" && <p className="notice" role="status">Your advice was deleted. Other students no longer see it.</p>}
+    {changeError && <p className="notice" role="alert">{adviceChangeMessage(changeError)}</p>}
+    {reported === "1" && <p className="notice" role="status">Thanks, your report was sent. An admin will check the advice.</p>}
+    {reportError && <p className="notice" role="alert">{adviceReportMessage(reportError)}</p>}
     {filtered && <p className="muted"><Link href={base}>Clear search and filters</Link></p>}
     {helpful === "marked" && <p className="notice" role="status">Marked as helpful.</p>}
     {helpful === "unmarked" && <p className="notice" role="status">Your helpful mark was removed.</p>}
@@ -78,7 +97,7 @@ export default async function AdvicePage({ params, searchParams }: { params: Pro
     {comment === "added" && <p className="notice" role="status">Your reply was posted.</p>}
     {comment === "deleted" && <p className="notice" role="status">The reply was deleted.</p>}
     {commentError && <p className="notice" role="alert">{commentMessage(commentError)}</p>}
-    <AdviceList items={result.items} emptyMessage={filtered ? "No advice matches your search." : "No advice has been published for this course yet. Be the first."}
+    <AdviceList items={result.items} page={result.page} canReport={Boolean(user)} reported={reportedIds} emptyMessage={filtered ? "No advice matches your search." : "No advice has been published for this course yet. Be the first."}
       helpful={{ courseId, counts, returnTo, loggedIn: Boolean(user) }}
       discussion={{ courseId, threads, returnTo, loggedIn: Boolean(user), openThread: thread }} />
     {result.totalPages > 1 && <nav className="muted" aria-label="Pages">

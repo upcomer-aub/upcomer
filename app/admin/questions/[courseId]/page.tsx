@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CorrectionLog, CorrectionTags } from "@/components/correction-log";
 import { requireAdmin } from "@/lib/auth";
+import { questionReviewReason } from "@/lib/question-content";
 import { getCorrectionPage } from "@/lib/question-corrections";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default async function CourseQuestionCorrectionsPage({ params, searchPara
   await requireAdmin(route);
   const view = await getCorrectionPage(courseId, { page: Number(requestedPage ?? 1), query: q ?? "" });
   if (!view) notFound();
-  const { course, groups, total, page, totalPages, totalPapers, log, query } = view;
+  const { course, groups, total, page, totalPages, totalPapers, log, query, ungrouped = [] } = view;
   const pageLink = (target: number) => `${route}?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(target) })}`;
   return <><Link className="back" href="/admin/questions">← Back to the question bank</Link>
     <span className="eyebrow">Admin · {course.code}</span><h1>Correct Questions</h1>
@@ -29,6 +30,7 @@ export default async function CourseQuestionCorrectionsPage({ params, searchPara
       <span className="eyebrow">#{group.rank} · in {group.paperCount} of {totalPapers} {totalPapers === 1 ? "paper" : "papers"}</span><h3>{group.text}</h3>
       <ul className="question-list">{group.questions.map(question => <li key={question.id}>
         <p className="muted">{question.file.title}, question {question.number} <CorrectionTags question={question} /></p>
+        {questionReviewReason(question.text) && <p className="muted">Review suggested: {questionReviewReason(question.text)}</p>}
         <p style={{ whiteSpace: "pre-line" }}>{question.text}</p>
         <p className="catalog-links"><Link href={`${route}/${encodeURIComponent(question.id)}`} aria-label={`Correct ${question.file.title} question ${question.number}`}>Correct</Link></p>
       </li>)}</ul>
@@ -38,6 +40,13 @@ export default async function CourseQuestionCorrectionsPage({ params, searchPara
       <span className="muted">Page {page} of {totalPages}</span>
       {page < totalPages && <Link className="button" href={pageLink(page + 1)}>Next →</Link>}
     </nav>}
+    <h2>Excluded and ungrouped entries</h2>
+    <p className="muted">Up to 20 entries matching your search. Review or restore them without deleting their source history.</p>
+    {ungrouped.map(question => <article className="card" key={question.id}>
+      <p>{question.file.title}, entry {question.number} <CorrectionTags question={question} /></p>
+      <p style={{ whiteSpace: "pre-line" }}>{question.text}</p>
+      <Link href={`${route}/${encodeURIComponent(question.id)}`}>Review entry</Link>
+    </article>)}
     <h2>Activity log</h2>
     <p className="muted">The latest corrections in {course.code}, newest first.</p>
     <CorrectionLog entries={log} label={`Corrections in ${course.code}`} />

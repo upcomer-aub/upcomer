@@ -46,17 +46,17 @@ export async function createAlternativeMockExam(userId: string, mockExamId: stri
   try {
     const exam = mockExamId ? await db.mockExam.findFirst({
       where: { id: mockExamId, userId },
-      select: { id: true, courseId: true, originalId: true, topicKeys: true, length: true, difficulty: true, includeGenerated: true },
+      select: { id: true, courseId: true, originalId: true, topicKeys: true, length: true, difficulty: true, includeGenerated: true, timeLimitMinutes: true },
     }) : null;
     if (!exam) return refuse("not_found");
     const originalId = exam.originalId ?? exam.id;
     return await inFamilyOrder(`${userId}:${originalId}`, async () => {
       const used = await db.mockExamQuestion.findMany({ where: { mockExam: familyWhere(userId, originalId) }, select: { groupId: true, generatedQuestionId: true, text: true } });
       const result = await createMockExam(userId, {
-        courseId: exam.courseId, length: String(exam.length), difficulty: exam.difficulty, topics: exam.topicKeys, includeGenerated: exam.includeGenerated,
+        courseId: exam.courseId, length: String(exam.length), difficulty: exam.difficulty, topics: exam.topicKeys, includeGenerated: exam.includeGenerated, timeLimit: exam.timeLimitMinutes == null ? "" : String(exam.timeLimitMinutes),
       }, { originalId, avoid: avoidSetOf(used) });
       if (!result.ok) {
-        const error: VersionError = result.error === "length_invalid" || result.error === "difficulty_invalid" ? "unexpected" : result.error;
+        const error: VersionError = result.error === "length_invalid" || result.error === "difficulty_invalid" || result.error === "time_limit_invalid" ? "unexpected" : result.error;
         return refuse(error, { available: result.available, length: exam.length, courseId: exam.courseId, originalId });
       }
       const family = await db.mockExam.findMany({ where: familyWhere(userId, originalId), select: { id: true, createdAt: true } });

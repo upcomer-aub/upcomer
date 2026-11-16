@@ -5,6 +5,22 @@ type LogEvent =
   | "advice_publish_failed"
   | "advice_search_failed"
   | "advice_retrieval_failed"
+  | "advice_feed_rate_limited"
+  | "advice_edited"
+  | "advice_deleted"
+  | "advice_change_refused"
+  | "advice_change_rate_limited"
+  | "advice_change_failed"
+  | "advice_report_submitted"
+  | "advice_report_refused"
+  | "advice_report_rate_limited"
+  | "advice_report_failed"
+  | "advice_report_queue_failed"
+  | "advice_removed_by_admin"
+  | "advice_reports_dismissed"
+  | "advice_moderation_refused"
+  | "advice_moderation_rate_limited"
+  | "advice_moderation_failed"
   | "learning_evidence_saved"
   | "learning_evidence_failed"
   | "learning_evidence_refused"
@@ -107,6 +123,11 @@ type LogEvent =
   | "topic_covered_refused"
   | "topic_covered_rate_limited"
   | "topic_covered_save_failed"
+  | "mock_exam_weighting_failed"
+  | "mock_exam_weighting_invalid_inputs"
+  | "mock_exam_timer_started"
+  | "mock_exam_expired"
+  | "mock_exam_late_save_refused"
   | "mock_exam_created"
   | "mock_exam_refused"
   | "mock_exam_rate_limited"
@@ -136,7 +157,17 @@ type LogEvent =
   | "walkthrough_refused"
   | "walkthrough_rate_limited"
   | "walkthrough_failed"
-  | "walkthrough_retrieval_failed";
+  | "walkthrough_retrieval_failed"
+  | "mock_exam_marked"
+  | "mock_exam_marking_failed"
+  | "mock_exam_marking_evidence_failed"
+  | "answer_key_saved"
+  | "answer_key_removed"
+  | "answer_key_refused"
+  | "answer_key_rate_limited"
+  | "answer_key_save_failed"
+  | "mock_results_rate_limited"
+  | "mock_results_retrieval_failed";
 
 
 export type { LogEvent };
@@ -152,6 +183,22 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   advice_publish_failed: "error",
   advice_search_failed: "error",
   advice_retrieval_failed: "error",
+  advice_feed_rate_limited: "warn",
+  advice_edited: "info",
+  advice_deleted: "info",
+  advice_change_refused: "warn",
+  advice_change_rate_limited: "warn",
+  advice_change_failed: "error",
+  advice_report_submitted: "info",
+  advice_report_refused: "warn",
+  advice_report_rate_limited: "warn",
+  advice_report_failed: "error",
+  advice_report_queue_failed: "error",
+  advice_removed_by_admin: "info",
+  advice_reports_dismissed: "info",
+  advice_moderation_refused: "warn",
+  advice_moderation_rate_limited: "warn",
+  advice_moderation_failed: "error",
   learning_evidence_saved: "info",
   learning_evidence_failed: "error",
   learning_evidence_refused: "warn",
@@ -279,6 +326,15 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   topic_covered_refused: "warn",
   topic_covered_rate_limited: "warn",
   topic_covered_save_failed: "error",
+  // Mustafa Ergaibi (Sprint 4): mock exams balance weakness and exam importance (US-47). IDs, the failing step, counts,
+  // reason codes, and error types only; topics and questions are never logged.
+  mock_exam_weighting_failed: "error",
+  mock_exam_weighting_invalid_inputs: "warn",
+  // Mustafa Ergaibi (Sprint 4): timed mock exam mode (US-48). IDs, the time limit, counts, the trigger, and how late a
+  // refused save was only; answers and questions are never logged.
+  mock_exam_timer_started: "info",
+  mock_exam_expired: "info",
+  mock_exam_late_save_refused: "warn",
   // Sprint 4: configurable mock exams (US-45; Ali Shammakh, taken over by Mustafa Ergaibi). IDs, the settings (length,
   // difficulty, a topic count), reason codes, and error types only; question text and answers are never logged.
   mock_exam_created: "info",
@@ -318,6 +374,19 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   walkthrough_rate_limited: "warn",
   walkthrough_failed: "error",
   walkthrough_retrieval_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): marking mock exams against answer keys (US-49). IDs, counts and reasons only; never an
+  // answer, a key point, or an explanation.
+  mock_exam_marked: "info",
+  mock_exam_marking_failed: "error",
+  mock_exam_marking_evidence_failed: "error",
+  answer_key_saved: "info",
+  answer_key_removed: "info",
+  answer_key_refused: "warn",
+  answer_key_rate_limited: "warn",
+  answer_key_save_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): the mock exam results report (US-50). IDs only.
+  mock_results_rate_limited: "warn",
+  mock_results_retrieval_failed: "error",
 
 };
 

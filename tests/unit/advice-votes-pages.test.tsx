@@ -14,12 +14,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: mocks.redirect }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser, requireUser: mocks.requireUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
-vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions }));
+vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: () => true }));
 vi.mock("@/lib/advice-votes", () => ({ getHelpfulCounts: mocks.getHelpfulCounts, setAdviceHelpful: mocks.setAdviceHelpful }));
 vi.mock("@/lib/advice-comments", () => ({ getAdviceComments: vi.fn(async () => new Map()) }));
 vi.mock("@/lib/advice-comment-actions", () => ({ addAdviceCommentAction: vi.fn(), deleteAdviceCommentAction: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logError: mocks.logError }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => null }));
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 import { setAdviceHelpfulAction } from "@/lib/advice-vote-actions";
 
@@ -27,7 +28,7 @@ const course = { id: "course-a", code: "EECE350", name: "Computer Networks", fac
 const advice = (id: string, over: Partial<PublicAdvice> = {}): PublicAdvice => ({
   id, courseId: course.id, title: `Title ${id}`, body: "Body", resourceUrl: null, resourceTitle: null,
   scope: { kind: "COURSE", label: "EECE350", fileId: null, termId: null, groupId: null, topic: null },
-  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, createdAt: new Date("2026-11-02T00:00:00Z"), ...over,
+  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, edited: false, createdAt: new Date("2026-11-02T00:00:00Z"), ...over,
 });
 const page = (searchParams: Record<string, string> = {}) =>
   AdvicePage({ params: Promise.resolve({ courseId: course.id }), searchParams: Promise.resolve(searchParams) }).then(renderToStaticMarkup);

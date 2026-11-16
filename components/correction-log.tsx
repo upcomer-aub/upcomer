@@ -4,6 +4,8 @@ import type { CorrectionLogEntry } from "@/lib/question-corrections";
 const date = (value: Date) => `${value.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 function Change({ entry }: { entry: CorrectionLogEntry }) {
+  if (entry.kind === "EXCLUDE") return <>Removed from question rankings and practice; source retained.</>;
+  if (entry.kind === "RESTORE") return <>Returned to automatic question validation and grouping.</>;
   if (entry.kind === "EDIT_TEXT") return <>From “{entry.before}” to “{entry.after}”</>;
   if (entry.kind === "MOVE") return <>From the group “{entry.before ?? "no group"}” to “{entry.after}”</>;
   return <>Left the group “{entry.before ?? "no group"}”</>;
@@ -24,8 +26,9 @@ export function CorrectionLog({ entries, label }: { entries: CorrectionLogEntry[
 }
 
 // Shows how a question was corrected, next to the question.
-export function CorrectionTags({ question }: { question: { textCorrectedAt: Date | null; pinnedToQuestionId: string | null; splitOut: boolean } }) {
+export function CorrectionTags({ question }: { question: { textCorrectedAt: Date | null; pinnedToQuestionId: string | null; splitOut: boolean; excludedFromBank?: boolean } }) {
   const tags = [
+    question.excludedFromBank && "Excluded: not a question",
     question.textCorrectedAt && "Text corrected",
     question.pinnedToQuestionId && "Moved by an admin",
     question.splitOut && "Split by an admin",

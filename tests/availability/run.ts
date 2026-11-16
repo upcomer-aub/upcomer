@@ -16,7 +16,7 @@ import {
 
 // npm run availability: availability and reliability of every API as the number of concurrent users grows.
 // It builds and starts the production app, then runs a realistic mix of student requests (catalog search, course pages,
-// exam lists, question bank, ordered exam, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
+// exam lists, question bank, ordered exam, student advice, editing one's own advice, reporting advice, the admin-only advice queue, opening files, My Courses, profile, logging in, adding a course) with 1, 10, 25,
 // 50, and 100 users at once. Every request is recorded per API as available or not (timeout, connection error, 5xx, or an
 // unexpected status), correct or not, and how long it took. The report compares availability, error rates, latency
 // percentiles, throughput, timeouts, and error types across the user counts, with machine CPU, server memory, database
@@ -48,7 +48,14 @@ const PASSWORD = "availability-pass-123";
 
 type Course = { id: string; code: string };
 type User = { id: string; email: string; name: string; client: Client };
-type World = { courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string } };
+// advice: the stamp in every advice title the run creates, the name of the author of its anonymous advice, and each user's
+// own (anonymous) advice in the first course, which they open and edit (US-36).
+type World = {
+  courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string; editAdvice: string; reportAdvice: string };
+  marking: { stamp: string; exams: Map<string, string> };
+  advice: { stamp: string; hiddenAuthor: string; own: Map<string, string>; reportable: string };
+};
+let adviceEdits = 0;
 type Api = { name: string; weight: number; run(user: User, world: World, rng: Rng): Promise<{ reply: Reply; expected: number[]; correct: boolean }> };
 
 // The mix of requests, weighted like a student's visit: mostly reading, some logging in and adding courses.
@@ -77,6 +84,65 @@ const APIS: Api[] = [
     const course = rng.pick(world.courses);
     const reply = await user.client.get(`/courses/${course.id}/exam`, TIMEOUT_MS);
     return { reply, expected: [200], correct: reply.body.includes("Upcomer Exam") && reply.body.includes(course.code) };
+  } },
+  // US-38: correct only when the page shows this course's visible advice, and neither the removed advice, another course's
+  // advice, nor the name of the anonymous author.
+  { name: "GET /courses/:courseId/advice", weight: 10, async run(user, world, rng) {
+    const course = rng.pick(world.courses);
+    const other = world.courses.find(item => item.id !== course.id);
+    const reply = await user.client.get(`/courses/${course.id}/advice`, TIMEOUT_MS);
+    const { stamp, hiddenAuthor } = world.advice;
+    const correct = reply.body.includes(`${stamp} visible ${course.id}`) && reply.body.includes(`${stamp} anonymous ${course.id}`)
+      && !reply.body.includes(`${stamp} removed`) && !reply.body.includes(hiddenAuthor) && (!other || !reply.body.includes(`${stamp} visible ${other.id}`));
+    return { reply, expected: [200], correct };
+  } },
+  // US-36: correct only when the user's own advice is on the page, ready to edit.
+  { name: "GET /courses/:courseId/advice/:adviceId/edit (own advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    const reply = await user.client.get(`/courses/${course.id}/advice/${world.advice.own.get(user.id)}/edit`, TIMEOUT_MS);
+    return { reply, expected: [200], correct: reply.body.includes("Edit your advice") && reply.body.includes(`${world.advice.stamp} own ${user.id}`) };
+  } },
+  // US-36: every save has new text, so each one is a real write that invalidates the course's feed cache.
+  { name: "POST /courses/:courseId/advice/:adviceId/edit (edit own advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    const adviceId = world.advice.own.get(user.id)!;
+    const reply = await user.client.postAction(`/courses/${course.id}/advice/${adviceId}/edit`, world.actions.editAdvice, {
+      courseId: course.id, adviceId, title: `${world.advice.stamp} own ${user.id}`, body: `Version ${++adviceEdits}`, resourceUrl: "", resourceTitle: "", page: "1",
+    }, TIMEOUT_MS);
+    return { reply, expected: [303], correct: reply.location === `/courses/${course.id}/advice?edited=1` };
+  } },
+  // US-43: each user reports the same advice (by no user). Their first report is sent and later ones are refused as
+  // duplicates; both are correct, anything else (a refusal of another kind, or no redirect) is not.
+  { name: "POST /courses/:courseId/advice/:adviceId/report (report advice)", weight: 5, async run(user, world) {
+    const course = world.courses[0];
+    // Posted to the report page, where the form is: Next.js finds a form's action only on its own page.
+    const reply = await user.client.postAction(`/courses/${course.id}/advice/${world.advice.reportable}/report`, world.actions.reportAdvice, {
+      courseId: course.id, adviceId: world.advice.reportable, reason: "SPAM", note: "", page: "1",
+    }, TIMEOUT_MS);
+    const feed = `/courses/${course.id}/advice?`;
+    return { reply, expected: [303], correct: reply.location === `${feed}reported=1` || reply.location === `${feed}report_error=duplicate` };
+  } },
+  // US-77: the moderation queue is for admins only; a student must get the not-found page, never the queue.
+  { name: "GET /admin/advice-reports (student refused)", weight: 2, async run(user) {
+    const reply = await user.client.get("/admin/advice-reports", TIMEOUT_MS);
+    return { reply, expected: [404], correct: !reply.body.includes("Advice Reports") && !reply.body.includes("Remove advice") };
+  } },
+  // US-49: correct only when the user's own marked exam shows its marks and explanations, and the unkeyed question is
+  // flagged as not marked.
+  { name: "GET /courses/:courseId/mock-exams/:mockExamId (marked exam)", weight: 5, async run(user, world) {
+    const reply = await user.client.get(`/courses/${world.courses[0].id}/mock-exams/${world.marking.exams.get(user.id)}`, TIMEOUT_MS);
+    const correct = reply.body.includes(`${world.marking.stamp} question for ${user.id}`) && reply.body.includes("Partly correct")
+      && reply.body.includes("Not marked: no answer key") && reply.body.includes("Your answer does not cover");
+    return { reply, expected: [200], correct };
+  } },
+  // US-50: correct only when the report's score and breakdown match the marked exam: 3 questions, 2 marked, 1 fully
+  // correct, half the key points of the partly correct one covered (75% overall), 1 not marked.
+  { name: "GET /courses/:courseId/mock-exams/:mockExamId/results", weight: 5, async run(user, world) {
+    const reply = await user.client.get(`/courses/${world.courses[0].id}/mock-exams/${world.marking.exams.get(user.id)}/results`, TIMEOUT_MS);
+    const text = reply.body.replace(/<!-- -->/g, "");
+    const correct = text.includes("<strong>1 of 2</strong> marked questions fully correct · 75% of the key points covered")
+      && text.includes("1 of 3 questions was not marked") && text.includes("congestion avoidance");
+    return { reply, expected: [200], correct };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
@@ -226,8 +292,9 @@ const portInUse = () => new Promise<boolean>(resolve => {
 function startServer(logFile: string) {
   const log = createWriteStream(logFile);
   const command = `${process.env.AVAILABILITY_SKIP_BUILD === "1" ? "" : "npm run build && "}npx next start --port ${PORT}`;
-  // Logs are not saved to the database during the run, so the run itself does not change what it measures.
-  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off" }, stdio: ["ignore", "pipe", "pipe"] });
+  // Logs are not saved to the database during the run, so the run itself does not change what it measures. Each user edits
+  // their advice more often than a person would, so the per-student change limit (DoS protection, US-36) is raised.
+  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", MOCK_RESULTS_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_REPORT_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);
   return server;
@@ -338,9 +405,47 @@ async function main() {
       .filter(file => existsSync(path.join(storageRoot(), file.storageKey))).map(file => file.id);
     if (!courses.length || !files.length) throw new Error("No courses with files. Run npm run db:seed first.");
     const users = await createUsers(db, stamp, Math.max(...STAGES));
+    // Advice in every course (US-38): one without an author account, one anonymous by the first user (whose name must never
+    // show), and one removed. Only the anonymous advice is by the first user, so their name on the page is always a leak.
+    const reportable = `${stamp.toLowerCase()}-reportable`;
+    await db.advice.createMany({ data: courses.flatMap((course, index) => [
+      // The first course's is the one every user reports (US-43).
+      { ...(index === 0 && { id: reportable }), courseId: course.id, authorId: null, scopeKind: "COURSE" as const, scopeLabel: course.code, title: `${stamp} visible ${course.id}`, body: "Availability advice." },
+      { courseId: course.id, authorId: users[0].id, isAnonymous: true, scopeKind: "COURSE" as const, scopeLabel: course.code, title: `${stamp} anonymous ${course.id}`, body: "Availability advice." },
+      { courseId: course.id, authorId: users[0].id, scopeKind: "COURSE" as const, scopeLabel: course.code, title: `${stamp} removed ${course.id}`, body: "Availability advice.", status: "REMOVED" as const, removedAt: new Date() },
+    ]) });
+    // Each user's own advice to edit (US-36), anonymous so no user's name ever shows, and a day old so it sorts after the
+    // advice above on the first feed page.
+    const own = new Map(users.map(user => [user.id, `${stamp.toLowerCase()}-own-${user.id}`]));
+    await db.advice.createMany({ data: users.map(user => ({
+      id: own.get(user.id)!, courseId: courses[0].id, authorId: user.id, isAnonymous: true, scopeKind: "COURSE" as const, scopeLabel: courses[0].code,
+      title: `${stamp} own ${user.id}`, body: "Availability advice.", createdAt: new Date(Date.now() - 86_400_000),
+    })) });
+    const editPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${own.get(users[0].id)}/edit`);
+    const reportPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${reportable}/report`);
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
-    const world: World = { courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses") } };
+    // Each user's submitted, marked mock exam (US-49). Deleting the users at the end deletes them.
+    const markedExams = new Map(users.map(user => [user.id, `${stamp.toLowerCase()}-mock-${user.id}`]));
+    const now = new Date();
+    await db.mockExam.createMany({ data: users.map(user => ({
+      id: markedExams.get(user.id)!, userId: user.id, courseId: courses[0].id, topicKeys: [], topics: [], length: 3, difficulty: "MIXED" as const,
+      status: "SUBMITTED" as const, submittedAt: now, markedAt: now,
+    })) });
+    await db.mockExamQuestion.createMany({ data: users.flatMap(user => [
+      { outcome: "CORRECT" as const, matchedPoints: ["three-way handshake"], missedPoints: [], feedback: null },
+      { outcome: "PARTIAL" as const, matchedPoints: ["slow start"], missedPoints: ["congestion avoidance"], feedback: 'Your answer does not cover: "congestion avoidance".' },
+      { outcome: "NO_KEY" as const, matchedPoints: [], missedPoints: [], feedback: "This question has no answer key yet, so your answer was not marked." },
+    ].map((marking, index) => ({
+      mockExamId: markedExams.get(user.id)!, position: index + 1, text: `${stamp} question for ${user.id} ${index + 1}`, paperCount: 1, totalPapers: 1,
+      sourcePapers: [], answer: "An answer.", answeredAt: now, markedAt: now, ...marking,
+    }))) });
+    const world: World = {
+      courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes"),
+        reportAdvice: actionIdFor(reportPage.body, "Send report") },
+      advice: { stamp, hiddenAuthor: users[0].name, own, reportable },
+      marking: { stamp, exams: markedExams },
+    };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,
     // so every API is called twice before measuring.
     const warmUp = createRng(SEED);
@@ -359,6 +464,8 @@ async function main() {
     console.log(`Supported concurrent users: ${supported}. Report: ${base}.md`);
   } finally {
     stopServer(server);
+    // The advice is in the seeded courses, so it is deleted by its stamp (deleting the users would only clear its author).
+    await db.advice.deleteMany({ where: { title: { startsWith: `${stamp} ` } } });
     await cleanUp(db, stamp, { uploadedFileIds: [], since });
     await db.$disconnect();
   }

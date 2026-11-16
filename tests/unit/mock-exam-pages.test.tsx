@@ -28,7 +28,8 @@ const listPage = () => MockExamsPage({ params: Promise.resolve({ courseId: cours
 const pastPaper = { id: "mq-1", position: 1, topic: "TCP", text: "Explain the handshake.\na) SYN\nb) ACK", paperCount: 2, totalPapers: 5, sourcePapers: ["Final (2024)", "Midterm (2023)"], answer: "My answer" };
 const generated = { id: "mq-2", position: 2, topic: "DNS", text: "Plan a solution for the resolver task.", paperCount: 0, totalPapers: 5, sourcePapers: ["Final 2025"], answer: null };
 const exam = (over: Record<string, unknown> = {}) => ({
-  id: "mock-1", courseId: course.id, length: 2, difficulty: "HARD", topics: ["TCP", "DNS"], includeGenerated: true, status: "IN_PROGRESS",
+  id: "mock-1", courseId: course.id, length: 2, requestedLength: 2, difficulty: "HARD", topics: ["TCP", "DNS"], includeGenerated: true,
+  mixBasis: null, weakTopics: [] as string[], status: "IN_PROGRESS",
   createdAt: new Date("2026-11-15T10:00:00Z"), submittedAt: null, questions: [pastPaper, generated], ...over,
 });
 const examPage = (query: Record<string, string> = {}, ids = { courseId: course.id, mockExamId: "mock-1" }) =>
@@ -157,6 +158,33 @@ describe("the mock exam sitting page (US-45)", () => {
     expect(notices(await examPage({ saved: "1" }))).toEqual([["status", "Your answers were saved."]]);
     expect(notices(await examPage({ submitted: "1" }))).toEqual([["status", "Your exam was submitted."]]);
     expect(notices(await examPage({ same: "1" }))).toEqual([["status", "Your topics have just enough past-paper questions for this exam, so the difficulty could not choose between them. Any difficulty gives these questions."]]);
+  });
+  it("says every time it is opened that the exam is shorter than asked, and why (US-45)", async () => {
+    mocks.getMockExam.mockResolvedValue(exam({ requestedLength: 10, includeGenerated: false }));
+    const message = "You asked for 10 questions, but your topics have only 2 that fit, so this exam has 2.";
+    expect(notices(await examPage({ same: "1" }))).toEqual([["status", message]]);
+    expect(notices(await examPage({ saved: "1" }))).toEqual([["status", message], ["status", "Your answers were saved."]]);
+    mocks.getMockExam.mockResolvedValue(exam({ requestedLength: 10 }));
+    expect(notices(await examPage())).toEqual([["status", "You asked for 10 questions, but your topics have only 2 that fit (past papers and your generated practice questions of this difficulty), so this exam has 2."]]);
+    // An exam of the length asked for, or one made before the requested length was kept, says nothing.
+    mocks.getMockExam.mockResolvedValue(exam({ requestedLength: null }));
+    expect(notices(await examPage())).toEqual([]);
+  });
+  it("says why the exam has its mix of topics, without claiming mastery (US-47)", async () => {
+    const mixLine = async (over: Record<string, unknown>) => {
+      mocks.getMockExam.mockResolvedValue(exam(over));
+      return (await examPage()).match(/<p class="muted" data-testid="mock-mix">(.*?)<\/p>/)?.[1] ?? null;
+    };
+    expect(await mixLine({ mixBasis: "PROFILE", weakTopics: ["Routing", "DNS"] })).toBe("Weighted toward your weaker topics: Routing, DNS, and toward the topics that come up most in past papers.");
+    expect(await mixLine({ mixBasis: "PROFILE", weakTopics: ["DNS"] })).toBe("Weighted toward your weaker topic: DNS, and toward the topics that come up most in past papers.");
+    expect(await mixLine({ mixBasis: "PROFILE" })).toBe("Weighted by your ratings and practice results and by how often each topic comes up in past papers.");
+    expect(await mixLine({ mixBasis: "NO_PROFILE" })).toBe("You have no ratings or practice results in this course yet, so the mix follows how often each topic comes up in past papers.");
+    expect(await mixLine({ mixBasis: "PROFILE_UNAVAILABLE" })).toBe("Your ratings could not be read, so the mix follows how often each topic comes up in past papers.");
+    expect(await mixLine({ mixBasis: null })).toBeNull();
+    const html = await examPage();
+    expect(html).not.toMatch(/master|you know|strong at/i);
+    // Topic names are escaped like any text.
+    expect(await mixLine({ mixBasis: "PROFILE", weakTopics: ["<b>DNS</b>"] })).toContain("&lt;b&gt;DNS&lt;/b&gt;");
   });
   it("shows a refusal as an alert, alone, and never echoes a value from the URL", async () => {
     expect(notices(await examPage({ error: "already_submitted", saved: "1" }))).toEqual([["alert", "This exam was already submitted, so its answers can&#x27;t change."]]);

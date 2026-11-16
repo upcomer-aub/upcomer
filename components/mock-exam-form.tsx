@@ -23,7 +23,7 @@ export function MockExamForm({ courseId, options }: { courseId: string; options:
     {state.status === "error" && <p className="notice error" role="alert">{mockExamMessage(state.error ?? "unexpected", state.available)}</p>}
     {options.topics.length > 0 && <fieldset className="checkbox-list" key={`topics-${attempt}`}>
       <legend>Topics</legend>
-      <p className="muted">Leave all unticked to use every topic.</p>
+      <p className="muted">Leave all unticked to use every topic. More questions come from the topics you rated weaker and the topics that come up most in past papers.</p>
       {options.topics.map(topic => <label key={topic.key}>
         <input type="checkbox" name="topic" value={topic.key} defaultChecked={chosen.has(topic.key)} /> {topic.label} ({topic.count} {topic.count === 1 ? "question" : "questions"})
       </label>)}

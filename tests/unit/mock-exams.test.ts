@@ -435,7 +435,7 @@ describe("timed mock exams (US-48)", () => {
       expect(db.$queryRaw).toHaveBeenCalledTimes(1);
       const { sql, values } = sqlOf(db.$queryRaw.mock.calls[0]);
       expect(sql).toContain(`exam."status" = 'IN_PROGRESS'`);
-      expect(sql).toContain('exam."deadlineAt" < ?');
+      expect(sql).toContain("exam.\"deadlineAt\" < (?::timestamptz AT TIME ZONE 'UTC')");
       expect(sql).toContain('"submittedAt" = exam."deadlineAt"');
       // Only deadlines older than the grace: now minus five seconds.
       expect(values).toContainEqual(new Date(deadline.getTime() + 55_000));

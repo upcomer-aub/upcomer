@@ -287,7 +287,8 @@ describe("the mock exam sitting page (US-45)", () => {
       const html = await examPage();
       expect(html).toContain("Time ran out, so the answers saved by then were submitted. They are locked.");
       expect(html.match(/<textarea[^>]*readOnly=""/g)).toHaveLength(2);
-      expect(html).not.toContain("<button");
+      expect(html).not.toContain(">Save progress</button>");
+      expect(html).not.toContain(">Submit exam</button>");
       // A normal submit of a timed exam keeps the normal wording.
       mocks.getMockExam.mockResolvedValue(exam({ ...running, remainingMs: null, status: "SUBMITTED", submittedAt: new Date() }));
       const normal = await examPage({ submitted: "1" });

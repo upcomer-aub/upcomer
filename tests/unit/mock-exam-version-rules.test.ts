@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { avoidSetOf, excludedIds, numberVersions, versionMessage } from "@/lib/mock-exam-version-rules";
-import { selectMockQuestions, type PoolQuestion } from "@/lib/mock-exam-rules";
+import { type PoolQuestion } from "@/lib/mock-exam-rules";
+import { selectMockQuestions } from "@/lib/mock-exam-mix";
 
 // US-46 rules: what an alternative version must avoid, how that plugs into selectMockQuestions (US-45's `exclude`), the
 // refusal message with the count, and version numbers.
@@ -39,17 +40,17 @@ describe("an alternative through selectMockQuestions (US-46 acceptance tests)", 
   it("keeps the settings and shares no question with the earlier versions", () => {
     const first = selectMockQuestions(pool, config);
     const used1 = pool.filter(item => ids(first).includes(item.id)).map(item => ({ groupId: item.id, generatedQuestionId: null, text: item.text }));
-    const second = selectMockQuestions(pool, config, { exclude: excludedIds(pool, [], avoidSetOf(used1)) });
+    const second = selectMockQuestions(pool, config, { requireFullLength: true, exclude: excludedIds(pool, [], avoidSetOf(used1)) });
     expect(ids(second)).toHaveLength(3);
     expect(ids(second).filter(id => ids(first).includes(id))).toEqual([]);
     // Version 3 avoids versions 1 and 2.
     const used2 = [...used1, ...pool.filter(item => ids(second).includes(item.id)).map(item => ({ groupId: item.id, generatedQuestionId: null, text: item.text }))];
-    const third = selectMockQuestions(pool, config, { exclude: excludedIds(pool, [], avoidSetOf(used2)) });
+    const third = selectMockQuestions(pool, config, { requireFullLength: true, exclude: excludedIds(pool, [], avoidSetOf(used2)) });
     expect(ids(third)).toHaveLength(3);
     expect(new Set([...ids(first), ...ids(second), ...ids(third)]).size).toBe(9);
     // Only one unused question is left: a fourth version is refused with that count.
     const used3 = [...used2, ...pool.filter(item => ids(third).includes(item.id)).map(item => ({ groupId: item.id, generatedQuestionId: null, text: item.text }))];
-    expect(selectMockQuestions(pool, config, { exclude: excludedIds(pool, [], avoidSetOf(used3)) })).toEqual({ ok: false, error: "not_enough_questions", available: 1 });
+    expect(selectMockQuestions(pool, config, { requireFullLength: true, exclude: excludedIds(pool, [], avoidSetOf(used3)) })).toEqual({ ok: false, error: "not_enough_questions", available: 1 });
   });
 });
 

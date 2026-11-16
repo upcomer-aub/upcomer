@@ -15,6 +15,8 @@ vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOpti
 vi.mock("@/lib/advice-changes", () => ({ adviceChangeMessage: (error: string) => `message for ${error}` }));
 vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => <form data-advice-form="true" /> }));
+vi.mock("@/lib/advice-votes", () => ({ getHelpfulCounts: async () => new Map() }));
+vi.mock("@/lib/advice-comments", () => ({ getAdviceComments: async () => new Map() }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 
 const course = { id: "course-a", code: "EECE350", name: "Computer Networks" };

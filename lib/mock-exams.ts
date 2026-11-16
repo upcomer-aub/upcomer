@@ -141,8 +141,9 @@ export async function createMockExam(userId: string, input: CreateMockExamInput,
     } catch (error) {
       weighting("profile", error);
     }
-    const selected = selectMockQuestions(pool, config, { generated, profile: profile ?? undefined, ...(version ? { exclude: excludedIds(pool, generated, version.avoid) } : {}) });
+    const selected = selectMockQuestions(pool, config, { generated, profile: profile ?? undefined, ...(version ? { requireFullLength: true, exclude: excludedIds(pool, generated, version.avoid) } : {}) });
     if (!selected.ok) return refuse(selected.error, selected.available);
+    if (version && selected.length !== config.length) return refuse("not_enough_questions", selected.length);
     const mixBasis = !profile ? MockExamMix.PROFILE_UNAVAILABLE : selected.hasProfile ? MockExamMix.PROFILE : MockExamMix.NO_PROFILE;
     const limit = checkRateLimit(`mock-exam:${userId}`, mockExamLimit(), MOCK_EXAM_RATE_WINDOW_MS);
     if (!limit.ok) {
@@ -206,8 +207,8 @@ export async function finalizeExpiredMockExams(
   if (!filter.userId && !filter.courseId && !filter.mockExamId) return [];
   const rows = await client.$queryRaw<Array<{ id: string; userId: string; answered: number }>>`
     UPDATE "MockExam" AS exam
-    SET "status" = 'SUBMITTED'::"MockExamStatus", "timedOut" = true, "submittedAt" = exam."deadlineAt", "updatedAt" = ${now}::timestamp
-    WHERE exam."status" = 'IN_PROGRESS'::"MockExamStatus" AND exam."deadlineAt" < ${oldestOpenDeadline(now)}::timestamp
+    SET "status" = 'SUBMITTED'::"MockExamStatus", "timedOut" = true, "submittedAt" = exam."deadlineAt", "updatedAt" = (${now}::timestamptz AT TIME ZONE 'UTC')
+    WHERE exam."status" = 'IN_PROGRESS'::"MockExamStatus" AND exam."deadlineAt" < (${oldestOpenDeadline(now)}::timestamptz AT TIME ZONE 'UTC')
       ${filter.userId ? Prisma.sql`AND exam."userId" = ${filter.userId}` : Prisma.empty}
       ${filter.courseId ? Prisma.sql`AND exam."courseId" = ${filter.courseId}` : Prisma.empty}
       ${filter.mockExamId ? Prisma.sql`AND exam."id" = ${filter.mockExamId}` : Prisma.empty}
@@ -278,7 +279,7 @@ export async function startMockExam(userId: string, mockExamId: string): Promise
     const now = new Date();
     const started = await db.$queryRaw<Array<{ courseId: string; timeLimitMinutes: number; length: number }>>`
       UPDATE "MockExam" AS exam
-      SET "startedAt" = ${now}::timestamp, "deadlineAt" = ${now}::timestamp + exam."timeLimitMinutes" * interval '1 minute', "updatedAt" = ${now}::timestamp
+      SET "startedAt" = (${now}::timestamptz AT TIME ZONE 'UTC'), "deadlineAt" = (${now}::timestamptz AT TIME ZONE 'UTC') + exam."timeLimitMinutes" * interval '1 minute', "updatedAt" = (${now}::timestamptz AT TIME ZONE 'UTC')
       WHERE exam."id" = ${mockExamId} AND exam."userId" = ${userId} AND exam."status" = 'IN_PROGRESS'::"MockExamStatus"
         AND exam."timeLimitMinutes" IS NOT NULL AND exam."startedAt" IS NULL
       RETURNING exam."courseId", exam."timeLimitMinutes", exam."length"`;
@@ -353,7 +354,7 @@ export async function saveMockExam(userId: string, mockExamId: string, answers: 
         const texts = cleaned.map(([, answer]) => answer);
         await tx.$executeRaw`
           UPDATE "MockExamQuestion" AS question
-          SET "answer" = NULLIF(sent.answer, ''), "answeredAt" = CASE WHEN sent.answer = '' THEN NULL ELSE ${now}::timestamp END
+          SET "answer" = NULLIF(sent.answer, ''), "answeredAt" = CASE WHEN sent.answer = '' THEN NULL ELSE (${now}::timestamptz AT TIME ZONE 'UTC') END
           FROM unnest(${ids}::text[], ${texts}::text[]) AS sent(id, answer)
           WHERE question."id" = sent.id AND question."mockExamId" = ${mockExamId}
             AND question."answer" IS DISTINCT FROM NULLIF(sent.answer, '')`;

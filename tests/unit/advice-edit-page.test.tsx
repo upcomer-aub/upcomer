@@ -17,6 +17,8 @@ vi.mock("@/lib/advice-change-actions", () => ({ editAdviceAction: vi.fn(), delet
 vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => null }));
 import EditAdvicePage from "@/app/courses/[courseId]/advice/[adviceId]/edit/page";
+vi.mock("@/lib/advice-votes", () => ({ getHelpfulCounts: async () => new Map() }));
+vi.mock("@/lib/advice-comments", () => ({ getAdviceComments: async () => new Map() }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 
 const own = { id: "advice-1", courseId: "course-a", title: "Start early", body: "Labs take long.", resourceUrl: "https://example.com/x", resourceTitle: "X", isAnonymous: true, about: "The whole course" };

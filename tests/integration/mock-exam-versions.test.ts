@@ -52,7 +52,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-const original = async (over: Partial<{ length: string; difficulty: string; topics: string[]; includeGenerated: boolean }> = {}) => {
+const original = async (over: Partial<{ length: string; difficulty: string; topics: string[]; includeGenerated: boolean; timeLimit: string }> = {}) => {
   const result = await createMockExam(ids.student, { courseId: ids.course, length: "3", difficulty: "MIXED", topics: ["tcp"], ...over });
   if (!result.ok) throw new Error(`create failed: ${result.error}`);
   return result.id;
@@ -66,6 +66,14 @@ const questionsOf = async (mockExamId: string) =>
   db.mockExamQuestion.findMany({ where: { mockExamId }, orderBy: { position: "asc" }, select: { groupId: true, generatedQuestionId: true, text: true, topicKey: true } });
 
 describe("alternative versions (US-46)", () => {
+  it("preserves the time limit on an alternative version and keeps its questions locked until Start", async () => {
+    const first = await original({ timeLimit: "30" });
+    const second = await alternative(first);
+    const exam = await getMockExam(ids.student, second.id);
+    expect(exam).toMatchObject({ timeLimitMinutes: 30, locked: true, startedAt: null, questions: [] });
+    expect(await questionsOf(second.id)).toHaveLength(3);
+  });
+
   it("keeps the topics, length and difficulty, and changes every question (acceptance tests 1 and 2)", async () => {
     const first = await original({ difficulty: "HARD" });
     const second = await alternative(first);

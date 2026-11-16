@@ -15,13 +15,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: mocks.redirect }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.getCurrentUser, requireUser: mocks.requireUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
-vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions }));
+vi.mock("@/lib/advice", () => ({ searchAdvice: mocks.searchAdvice, getAdviceOptions: mocks.getAdviceOptions, allowAdviceFeedRead: () => true }));
 vi.mock("@/lib/advice-votes", () => ({ getHelpfulCounts: mocks.getHelpfulCounts }));
 vi.mock("@/lib/advice-vote-actions", () => ({ setAdviceHelpfulAction: vi.fn() }));
 vi.mock("@/lib/advice-comments", () => ({
   getAdviceComments: mocks.getAdviceComments, addAdviceComment: mocks.addAdviceComment, deleteAdviceComment: mocks.deleteAdviceComment,
 }));
 vi.mock("@/components/advice-form", () => ({ AdviceForm: () => null }));
+vi.mock("@/lib/advice-reports", () => ({ getOpenReportedAdviceIds: async () => new Set<string>() }));
 import AdvicePage from "@/app/courses/[courseId]/advice/page";
 import { addAdviceCommentAction, deleteAdviceCommentAction } from "@/lib/advice-comment-actions";
 
@@ -29,7 +30,7 @@ const course = { id: "course-a", code: "EECE350", name: "Computer Networks", fac
 const advice = (id: string, over: Partial<PublicAdvice> = {}): PublicAdvice => ({
   id, courseId: course.id, title: `Title ${id}`, body: "Body", resourceUrl: null, resourceTitle: null,
   scope: { kind: "COURSE", label: "EECE350", fileId: null, termId: null, groupId: null, topic: null },
-  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, createdAt: new Date("2026-11-02T00:00:00Z"), ...over,
+  authorLabel: "Anonymous student", isAnonymous: true, isMine: false, edited: false, createdAt: new Date("2026-11-02T00:00:00Z"), ...over,
 });
 const reply = (id: string, over: Partial<PublicComment> = {}): PublicComment => ({
   id, body: `Reply body ${id}`, createdAt: new Date("2026-11-15T10:05:00Z"), authorLabel: `Writer ${id}`, byPostAuthor: false, isMine: false, canDelete: false, ...over,

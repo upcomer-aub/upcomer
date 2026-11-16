@@ -13,6 +13,8 @@ import { checkedPriority, PRIORITY_TIE, type PriorityReason } from "@/lib/person
 // Topics the student marked as covered (US-32) are not an input: covered only steers "Study next".
 
 export type SelectOptions = {
+  // Alternative versions must retain the original length instead of returning a shorter exam.
+  requireFullLength?: boolean;
   // The student's generated practice questions, newest first (US-44). Used only when the settings ask for them.
   generated?: GeneratedCandidate[];
   // IDs (question-bank groups or generated items) to leave out, for an alternative version of an exam (US-46).
@@ -136,7 +138,7 @@ export function selectMockQuestions(pool: PoolQuestion[], { topicKeys, length: r
 
   const all = [...topics.values()];
   const available = all.reduce((sum, topic) => sum + topic.capacity, 0);
-  if (!available) return { ok: false, error: "not_enough_questions", available: 0 };
+  if (!available || (options.requireFullLength && available < requested)) return { ok: false, error: "not_enough_questions", available };
   const length = Math.min(requested, available);
 
   // The reserved slots.

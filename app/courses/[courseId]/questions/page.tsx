@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { QuestionList } from "@/components/question-list";
+import { SourceLabel } from "@/components/source-label";
 import { getCourseById } from "@/lib/courses";
 import { examTypeLabel } from "@/lib/file-metadata-rules";
 import { getQuestionBank, getQuestionBankFilterOptions, parseQuestionBankFilters } from "@/lib/question-bank";
@@ -20,6 +21,8 @@ export default async function QuestionBankPage({ params, searchParams }: { param
   const filtered = Boolean(chosen.query || chosen.year || chosen.termId || chosen.examType || chosen.professorId);
   const empty = bank.totalPapers === 0;
   return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Question Bank</h1>
+    {/* US-42: these counts are historical exam data, kept apart from student advice. */}
+    <SourceLabel kind="statistics">Tips are on the <Link href={`/courses/${courseId}/advice`}>Advice</Link> page (student opinion).</SourceLabel>
     <p className="muted">{empty
       ? "Questions from this course's previous exams will appear here."
       : `Questions from ${bank.totalPapers} previous ${bank.totalPapers === 1 ? "exam" : "exams"}, the most frequent first. The same question is listed once.`}</p>

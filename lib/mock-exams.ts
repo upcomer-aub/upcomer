@@ -10,6 +10,7 @@ import {
 } from "@/lib/mock-exam-rules";
 import { selectMockQuestions } from "@/lib/mock-exam-mix";
 import { finishesNow, isExpired, oldestOpenDeadline, timeLeftMs } from "@/lib/mock-exam-timing";
+import { excludedIds, type AvoidSet } from "@/lib/mock-exam-version-rules";
 import { getGeneratedPracticeQuestions } from "@/lib/practice-generation";
 import { courseExams } from "@/lib/question-bank";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
@@ -103,13 +104,15 @@ export type CreateMockExamResult = { ok: true; id: string; difficultyApplied: bo
 
 const paperLabel = (paper: { title: string; year: number | null }) => (paper.year ? `${paper.title} (${paper.year})` : paper.title);
 
+export type VersionOf = { originalId: string; avoid: AvoidSet };
+
 // Generates a mock exam for the given student, with only questions of the chosen topics and the chosen difficulty. It has
 // the length asked for, or the largest length those allow (US-45): the exam keeps both, and its page says it is shorter.
 // It is refused only when nothing matches.
 // The topic mix follows the student's profile in this course and exam frequency (US-47). If the profile cannot be read,
 // the exam is still made, by exam frequency only, and says so; the failure is logged.
 // The per-hour limit counts exams that are made: a refused attempt (an unknown topic, nothing matching) does not use it up.
-export async function createMockExam(userId: string, input: CreateMockExamInput): Promise<CreateMockExamResult> {
+export async function createMockExam(userId: string, input: CreateMockExamInput, version?: VersionOf): Promise<CreateMockExamResult> {
   const context = { userId, courseId: input.courseId.slice(0, 100) || undefined };
   const refuse = (error: MockExamError, available?: number): CreateMockExamResult => {
     logError("mock_exam_refused", { ...context, reason: error });
@@ -138,7 +141,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
     } catch (error) {
       weighting("profile", error);
     }
-    const selected = selectMockQuestions(pool, config, { generated, profile: profile ?? undefined });
+    const selected = selectMockQuestions(pool, config, { generated, profile: profile ?? undefined, ...(version ? { exclude: excludedIds(pool, generated, version.avoid) } : {}) });
     if (!selected.ok) return refuse(selected.error, selected.available);
     const mixBasis = !profile ? MockExamMix.PROFILE_UNAVAILABLE : selected.hasProfile ? MockExamMix.PROFILE : MockExamMix.NO_PROFILE;
     const limit = checkRateLimit(`mock-exam:${userId}`, mockExamLimit(), MOCK_EXAM_RATE_WINDOW_MS);
@@ -157,6 +160,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
         userId, courseId: course.id, topicKeys: config.topicKeys, topics: config.topicKeys.map(key => labels.get(key) ?? key),
         length: selected.length, requestedLength: selected.requested, difficulty: MockExamDifficulty[config.difficulty], includeGenerated: config.includeGenerated === true,
         mixBasis, weakTopics: mixBasis === MockExamMix.PROFILE ? selected.weakTopics : [], timeLimitMinutes,
+        ...(version ? { originalId: version.originalId } : {}),
         questions: {
           create: [
             ...selected.questions.map((question, index) => ({
@@ -181,6 +185,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
       ...context, mockExamId: created.id, difficulty: config.difficulty, length: String(selected.length), requestedLength: String(selected.requested),
       topicCount: String(config.topicKeys.length), generatedCount: String(selected.generated.length), mixBasis, weakTopicCount: String(selected.weakTopics.length),
       ...(timeLimitMinutes !== null && { timeLimitMinutes: String(timeLimitMinutes) }),
+      ...(version ? { originalId: version.originalId } : {}),
     });
     return { ok: true, id: created.id, difficultyApplied: selected.narrowed || config.difficulty === "MIXED", length: selected.length };
   } catch (error) {

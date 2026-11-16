@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MockExamSitting } from "@/components/mock-exam-sitting";
+import { MockExamVersionsSection } from "@/components/mock-exam-versions";
+import { versionMessage } from "@/lib/mock-exam-version-rules";
+import { getMockExamVersions } from "@/lib/mock-exam-versions";
 import { requireUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
 import { getMockExam } from "@/lib/mock-exams";
@@ -14,12 +17,15 @@ export const dynamic = "force-dynamic";
 // An exam whose time ran out (US-48) says so every time, instead of the notice of a normal submit; getMockExam has
 // already submitted it by the time this renders, and leaves out the questions of a timed exam that was not started.
 export default async function MockExamPage({ params, searchParams }: {
-  params: Promise<{ courseId: string; mockExamId: string }>; searchParams: Promise<{ saved?: string; submitted?: string; error?: string; same?: string }>;
+  params: Promise<{ courseId: string; mockExamId: string }>;
+  searchParams: Promise<{ saved?: string; submitted?: string; error?: string; same?: string; version?: string; version_error?: string; available?: string; length?: string }>;
 }) {
   const { courseId, mockExamId } = await params;
-  const { saved, submitted, error, same } = await searchParams;
+  const { saved, submitted, error, same, version, version_error: versionError, available, length } = await searchParams;
   const user = await requireUser(`/courses/${encodeURIComponent(courseId)}/mock-exams/${encodeURIComponent(mockExamId)}`);
-  const [course, exam] = await Promise.all([getCourseById(courseId), getMockExam(user.id, mockExamId)]);
+  // US-46: the exam's versions are read with it (only the student's own).
+  const [course, exam, family] = await Promise.all([getCourseById(courseId), getMockExam(user.id, mockExamId), getMockExamVersions(user.id, mockExamId)]);
+  const count = (value?: string) => (value && /^\d{1,3}$/.test(value) ? Number(value) : undefined);
   // Another student's exam, or one of another course, looks the same as one that doesn't exist.
   if (!course || !exam || exam.courseId !== courseId) notFound();
   const shorter = shorterMessage(exam.requestedLength, exam.length, exam.includeGenerated);
@@ -33,6 +39,9 @@ export default async function MockExamPage({ params, searchParams }: {
     {saved && !error && !exam.timedOut && <p className="notice" role="status">Your answers were saved.</p>}
     {submitted && !error && !exam.timedOut && <p className="notice" role="status">Your exam was submitted.</p>}
     {error && !(exam.timedOut && error === "time_up") && <p className="notice error" role="alert">{sittingMessage(error)}</p>}
+    {version === "new" && family.versions.length > 1 && !error && <p className="notice" role="status">This is version {family.current} of this mock exam: the same topics, length and difficulty, with questions not used in its earlier versions.</p>}
+    {versionError && <p className="notice error" role="alert">{versionMessage(versionError, count(available), count(length))}</p>}
     <MockExamSitting exam={exam} />
+    <MockExamVersionsSection courseId={courseId} mockExamId={exam.id} family={family} />
   </>;
 }

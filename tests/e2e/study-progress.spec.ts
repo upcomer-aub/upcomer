@@ -102,6 +102,9 @@ test("returning to the course, the exam opens at the first question not yet done
   // Coming back from marking a question stays on that question instead, even one far above the place to continue.
   await markDone(page, 6);
   await question(page, 1).getByRole("button", { name: "Undo done on question 1" }).click();
+  // Wait for the undo to land: the click itself scrolls question 1 into view, so being in view alone proves nothing.
+  await expect(page).toHaveURL(new RegExp(`${exam}\\?at=1(#question-1)?$`));
+  await expect(question(page, 1).getByRole("button", { name: "Mark question 1 done" })).toBeVisible();
   await expect(question(page, 1)).toBeInViewport();
   await page.goto(exam);
   await expect(page.getByRole("link", { name: "Continue at question 1" })).toBeVisible();

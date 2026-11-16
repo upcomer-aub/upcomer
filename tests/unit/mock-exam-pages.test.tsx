@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: mocks.redirect }));
 vi.mock("@/lib/auth", () => ({ requireUser: mocks.requireUser, getCurrentUser: mocks.getCurrentUser }));
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
+// US-46 (Lea Tass): the exam page also reads the exam's versions; one version here, so these tests are unchanged.
+vi.mock("@/lib/mock-exam-versions", () => ({ getMockExamVersions: vi.fn(async () => ({ current: 1, versions: [] })) }));
 vi.mock("@/lib/mock-exams", () => ({
   getMockExamOptions: mocks.getMockExamOptions, listMyMockExams: mocks.listMyMockExams, getMockExam: mocks.getMockExam,
   createMockExam: mocks.createMockExam, saveMockExam: mocks.saveMockExam, startMockExam: mocks.startMockExam,
@@ -173,7 +175,8 @@ describe("the mock exam sitting page (US-45)", () => {
     mocks.getMockExam.mockResolvedValue(exam({ status: "SUBMITTED", submittedAt: new Date() }));
     const html = await examPage();
     expect(html.match(/<textarea[^>]*readOnly=""/g)).toHaveLength(2);
-    expect(html).not.toContain("<button");
+    // No Save or Submit; since US-46 the only button is "Make an alternative version", outside the sitting form.
+    expect(html.match(/<button[^>]*>[^<]*<\/button>/g)).toEqual([expect.stringContaining(">Make an alternative version</button>")]);
     expect(html).toContain("Submitted. Your answers are locked.");
   });
   it("confirms a save and a submit, and explains a new exam the difficulty could not narrow", async () => {

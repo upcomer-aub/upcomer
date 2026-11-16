@@ -94,3 +94,15 @@ describe("personal order on the Upcomer Exam (US-28)", () => {
     expect(mocks.getPersonalOrder).not.toHaveBeenCalled();
   });
 });
+
+describe("weak-topic practice link on the Upcomer Exam (US-31)", () => {
+  const link = '<a href="/courses/course-a/practice/weak-topics">Practice your weak topics</a>';
+  it("links a logged-in student to their practice set, in either order", async () => {
+    expect(await page()).toContain(link);
+    expect(await page({ order: "personal" })).toContain(link);
+  });
+  it("shows no practice link to a visitor", async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+    expect(await page()).not.toContain("Practice your weak topics");
+  });
+});

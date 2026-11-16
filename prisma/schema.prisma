@@ -71,6 +71,10 @@ model User {
   removedAdvice       Advice[]             @relation("AdviceRemoved")
   adviceReports       AdviceReport[]       @relation("AdviceReporter")
   closedAdviceReports AdviceReport[]       @relation("AdviceReportClosedBy")
+  // Added for US-40: advice the student marked helpful.
+  adviceVotes         AdviceVote[]
+  // Added for US-41: replies the student wrote beneath advice.
+  adviceComments      AdviceComment[]
   // Added for US-45: the mock exams a student generated.
   mockExams           MockExam[]
 
@@ -513,6 +517,10 @@ model Advice {
   // Set when the author last edited the title, text, or link (US-36).
   editedAt      DateTime?
   reports       AdviceReport[]
+  // Added for US-40: the students who marked it helpful.
+  votes         AdviceVote[]
+  // Added for US-41: the replies beneath it.
+  comments      AdviceComment[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -571,6 +579,36 @@ model AdviceReport {
   @@index([adviceId, status])
   @@index([reporterId, status])
   @@index([courseId])
+}
+
+// One student marked one piece of advice as helpful (US-40). The primary key makes a second mark impossible; undoing
+// deletes the row. Who voted is never shown to students, only the count; see lib/advice-votes.ts.
+model AdviceVote {
+  adviceId  String
+  advice    Advice   @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([adviceId, userId])
+  @@index([userId])
+}
+
+// One reply beneath a piece of advice (US-41), shown oldest first. Deleting the advice deletes its replies; a reply whose
+// author deleted their account stays, shown as "Former student". The author ID is never sent to students: a reply by the
+// post's own author is labelled "(author)", and on an anonymous post as "Anonymous student (author)"; see
+// lib/advice-comments.ts. Only the reply's author or an admin can delete it.
+model AdviceComment {
+  id        String   @id @default(cuid())
+  adviceId  String
+  advice    Advice   @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([adviceId, createdAt])
+  @@index([authorId])
 }
 
 enum LearningSource {
@@ -692,6 +730,12 @@ model MockExam {
   difficulty  MockExamDifficulty
   // The student asked for their generated practice questions (US-44) to be mixed in. Kept with the other settings (US-46).
   includeGenerated Boolean       @default(false)
+  // US-46 (Lea Tass): an alternative version points at the original exam (version 1); every later version points at the
+  // same original, so a family is the original and the exams linked to it. Null for an original. Added in migration
+  // 20261119000000_mock_exam_versions; see lib/mock-exam-versions.ts.
+  originalId  String?
+  original    MockExam?          @relation("MockExamVersions", fields: [originalId], references: [id], onDelete: SetNull)
+  versions    MockExam[]         @relation("MockExamVersions")
   status      MockExamStatus     @default(IN_PROGRESS)
   submittedAt DateTime?
   // US-48, timed mode: the time limit in minutes (null = untimed), when the student pressed Start, and the server's
@@ -707,6 +751,7 @@ model MockExam {
 
   @@index([userId, courseId, createdAt])
   @@index([courseId])
+  @@index([originalId])
 }
 
 // One question of a mock exam, in sitting order (1 is first). The text and the evidence are copies taken when the exam was

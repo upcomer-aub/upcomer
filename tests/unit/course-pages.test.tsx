@@ -30,6 +30,7 @@ describe("course pages", () => {
     expect(html).toContain("Professor A");
     expect(html).toContain("/courses/course-a/exams");
     expect(html).toContain("/courses/course-a/materials");
+    expect(html).toContain('href="/courses/course-a/practice/weak-topics">Practice your weak topics</a>');
   });
   it("handles a missing course", async () => {
     getCourseById.mockResolvedValue(null);

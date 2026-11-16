@@ -3,6 +3,7 @@ import {
   ADVICE_BODY_MAX_LENGTH, ADVICE_LINK_TITLE_MAX_LENGTH, ADVICE_QUERY_MAX_LENGTH, ADVICE_TITLE_MAX_LENGTH, ANONYMOUS_AUTHOR_LABEL,
   cleanAdviceBody, collapseSpaces, FORMER_STUDENT_LABEL, isScopeName, parseResourceLink, topicKeyOf, type AdviceError, type AdviceScopeName,
 } from "@/lib/advice-rules";
+import type { AdviceSort } from "@/lib/advice-vote-rules";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { errorCode, logError } from "@/lib/logger";
@@ -153,7 +154,8 @@ export function toPublicAdvice(row: AdviceRow, viewerId: string | null): PublicA
   };
 }
 
-export type AdviceFilters = { query?: string; topic?: string; examId?: string; termId?: string; page?: number };
+// sort (US-40): "helpful" lists the most helpful first (ties: newest, then ID); anything else keeps newest first.
+export type AdviceFilters = { query?: string; topic?: string; examId?: string; termId?: string; page?: number; sort?: AdviceSort };
 export type AdvicePage = { items: PublicAdvice[]; total: number; page: number; totalPages: number };
 
 // The advice students may see in one course: visible, and not pointing at another course's exam paper or question
@@ -238,12 +240,12 @@ const pageKey = (requested: unknown) => {
   return Number.isInteger(number) && number > 0 ? Math.min(number, MAX_PAGE_KEY) : 1;
 };
 
-async function readPage(where: Prisma.AdviceWhereInput, requested: number) {
+async function readPage(where: Prisma.AdviceWhereInput, requested: number, sort?: AdviceSort) {
   const total = await db.advice.count({ where });
   const totalPages = Math.max(1, Math.ceil(total / ADVICE_PAGE_SIZE));
   const page = Math.min(requested, totalPages);
   const rows = await db.advice.findMany({
-    where, select: adviceSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * ADVICE_PAGE_SIZE, take: ADVICE_PAGE_SIZE,
+    where, select: adviceSelect, orderBy: [...(sort === "helpful" ? [{ votes: { _count: "desc" as const } }] : []), { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * ADVICE_PAGE_SIZE, take: ADVICE_PAGE_SIZE,
   });
   return { rows, total, page, totalPages };
 }
@@ -270,7 +272,7 @@ export async function searchAdvice(courseId: string, viewerId: string | null, fi
   const toPage = (entry: Omit<CachedPage, "expiresAt">): AdvicePage =>
     ({ items: entry.rows.map(row => toPublicAdvice(row, viewerId)), total: entry.total, page: entry.page, totalPages: entry.totalPages });
   try {
-    if (filtered) return toPage(await readPage(where, key));
+    if (filtered || filters.sort === "helpful") return toPage(await readPage(where, key, filters.sort));
     const cached = cachedPage(courseId, key, Date.now());
     if (cached) return await timed("advice_feed_cached", { courseId }, async () => toPage(cached));
     return await timed("advice_feed", { courseId }, async () => {

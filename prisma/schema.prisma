@@ -639,6 +639,13 @@ model MockExam {
   includeGenerated Boolean       @default(false)
   status      MockExamStatus     @default(IN_PROGRESS)
   submittedAt DateTime?
+  // US-48, timed mode: the time limit in minutes (null = untimed), when the student pressed Start, and the server's
+  // deadline (startedAt + limit). `timedOut` marks an exam submitted because its time ran out, with the answers saved by
+  // then; `submittedAt` is then the deadline.
+  timeLimitMinutes Int?
+  startedAt   DateTime?
+  deadlineAt  DateTime?
+  timedOut    Boolean            @default(false)
   questions   MockExamQuestion[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt

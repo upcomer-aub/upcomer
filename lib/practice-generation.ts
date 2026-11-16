@@ -1,3 +1,4 @@
+import { cleanExtractedQuestion, isUsableQuestion } from "@/lib/question-content";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { topicKey } from "@/lib/learning-profile";
@@ -11,10 +12,10 @@ class GenerationRefusal extends Error {
 
 type Provenance = {
   sourceFingerprint: string; topicKey: string;
-  sourceQuestion: { text: string; file: { courseId: string; category: string; status: string; topic: string | null } };
+  sourceQuestion: { text: string; excludedFromBank?: boolean; groupId?: string | null; file: { courseId: string; category: string; status: string; topic: string | null } };
 };
 const hasCurrentSource = (item: Provenance, courseId: string) =>
-  item.sourceQuestion.file.courseId === courseId && item.sourceQuestion.file.category === "EXAM"
+  isUsableQuestion(item.sourceQuestion) && item.sourceQuestion.groupId !== null && item.sourceQuestion.file.courseId === courseId && item.sourceQuestion.file.category === "EXAM"
   && item.sourceQuestion.file.status === "PUBLISHED" && item.sourceFingerprint === sourceFingerprint(item.sourceQuestion.text)
   && item.topicKey === topicKey(item.sourceQuestion.file.topic);
 
@@ -34,13 +35,13 @@ export async function generatePracticeQuestions(userId: string, courseId: string
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`generation:${userId}:${courseId}`}))`;
       if (!await tx.course.findUnique({ where: { id: courseId }, select: { id: true } })) throw new GenerationRefusal("not_found");
       const sources = await tx.question.findMany({
-        where: { file: { courseId, category: "EXAM", ...PUBLISHED_FILES }, groupId: { not: null } },
+        where: { excludedFromBank: false, file: { courseId, category: "EXAM", ...PUBLISHED_FILES }, groupId: { not: null } },
         include: { file: { select: { topic: true } } }, orderBy: [{ fileId: "asc" }, { number: "asc" }],
       });
-      const eligible = sources.filter(source => topicKey(source.file.topic) && (!settings.topicKey || topicKey(source.file.topic) === settings.topicKey) && source.text.trim().length >= 10 && source.text.length <= 12_000);
+      const eligible = sources.filter(source => isUsableQuestion(source) && topicKey(source.file.topic) && (!settings.topicKey || topicKey(source.file.topic) === settings.topicKey) && source.text.trim().length >= 10 && source.text.length <= 12_000);
       if (!eligible.length) throw new GenerationRefusal("no_sources");
       const existing = await tx.generatedPracticeQuestion.findMany({
-        where: { userId, courseId }, include: { sourceQuestion: { select: { text: true, file: { select: { courseId: true, category: true, status: true, topic: true } } } } },
+        where: { userId, courseId }, include: { sourceQuestion: { select: { text: true, excludedFromBank: true, groupId: true, file: { select: { courseId: true, category: true, status: true, topic: true } } } } },
       });
       const stale = existing.filter(item => !hasCurrentSource(item, courseId));
       // Invalidated items are no longer usable by mocks. Free their unique hashes before regenerating an identical
@@ -54,7 +55,7 @@ export async function generatePracticeQuestions(userId: string, courseId: string
       // Round-robin tasks across papers before taking a second task from the same source.
       for (let variant = 0; variant < 3 && selected.length < settings.count; variant++) {
         for (const source of eligible) {
-          const prompt = groundedPrompts(source.text, settings.difficulty)[variant];
+          const prompt = groundedPrompts(cleanExtractedQuestion(source.text), settings.difficulty)[variant];
           const hash = contentHash(prompt);
           if (seen.has(hash)) continue;
           seen.add(hash);
@@ -85,8 +86,8 @@ export async function generatePracticeQuestions(userId: string, courseId: string
 export async function getGeneratedPracticeQuestions(userId: string, courseId: string, settings: Partial<GenerationSettings> = {}) {
   try {
     const questions = await db.generatedPracticeQuestion.findMany({
-      where: { userId, courseId, ...(settings.difficulty && { difficulty: settings.difficulty }), ...(settings.topicKey && { topicKey: settings.topicKey }), sourceQuestion: { file: { courseId, category: "EXAM", ...PUBLISHED_FILES } } },
-      include: { sourceQuestion: { select: { text: true, fileId: true, file: { select: { title: true, topic: true, courseId: true, category: true, status: true } } } } },
+      where: { userId, courseId, ...(settings.difficulty && { difficulty: settings.difficulty }), ...(settings.topicKey && { topicKey: settings.topicKey }), sourceQuestion: { excludedFromBank: false, groupId: { not: null }, file: { courseId, category: "EXAM", ...PUBLISHED_FILES } } },
+      include: { sourceQuestion: { select: { text: true, excludedFromBank: true, groupId: true, fileId: true, file: { select: { title: true, topic: true, courseId: true, category: true, status: true } } } } },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     });
     return questions.filter(item => hasCurrentSource(item, courseId));

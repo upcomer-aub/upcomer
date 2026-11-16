@@ -130,3 +130,36 @@ test("a stale edit is refused and an undo groups the question by its text again"
   await expect(groupCard(page, 2)).toContainText("Explain TCP congestion control.");
   await expect(groupCard(page, 2)).toContainText("in 3 of 3 papers");
 });
+
+
+test("an admin cleans old exam rules and can exclude and restore an ambiguous entry", async ({ page, browser }) => {
+  const rule = await db.question.create({ data: { fileId: papers[0].id, number: 4, text: "4. This is an open book exam" } });
+  const candidate = await db.question.create({ data: { fileId: papers[0].id, number: 5, text: "5. Some unfamiliar campus policy details." } });
+  await logInAsAdmin(page);
+  await regroup(page);
+  const visitor = await browser.newPage();
+  try {
+    await visitor.goto(`/courses/${courseId}/exam`);
+    await expect(visitor.getByRole("main")).not.toContainText("This is an open book exam");
+    await expect(visitor.getByRole("main")).toContainText("Some unfamiliar campus policy details.");
+    const reviewRoute = `/admin/questions/${courseId}/${candidate.id}`;
+    await page.goto(reviewRoute);
+    await expect(page.getByRole("status")).toContainText("Check this entry");
+    await page.getByRole("button", { name: "Exclude: not a question", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Entry excluded" })).toBeVisible();
+    await visitor.reload();
+    await expect(visitor.getByRole("main")).not.toContainText("Some unfamiliar campus policy details.");
+    await regroup(page);
+    await page.goto(`/admin/questions/${courseId}`);
+    await expect(page.getByText("Excluded: not a question", { exact: true })).toBeVisible();
+    await page.goto(reviewRoute);
+    await page.getByRole("button", { name: "Restore entry", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Exclusion removed" })).toBeVisible();
+    await visitor.reload();
+    await expect(visitor.getByRole("main")).toContainText("Some unfamiliar campus policy details.");
+    expect(await db.questionCorrection.count({ where: { questionId: candidate.id, kind: { in: ["EXCLUDE", "RESTORE"] } } })).toBe(2);
+    expect(await db.question.findUniqueOrThrow({ where: { id: rule.id } })).toMatchObject({ groupId: null });
+  } finally {
+    await visitor.close();
+  }
+});

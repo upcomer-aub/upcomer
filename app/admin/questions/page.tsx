@@ -16,6 +16,7 @@ export default async function AdminQuestionsPage({ searchParams }: { searchParam
   const courses = await getQuestionBankOverview();
   const rebuiltCourse = courses.find(course => course.id === rebuilt);
   return <><Link className="back" href="/admin/catalog">← Back to catalog</Link><span className="eyebrow">Admin</span><h1>Question Bank</h1>
+    <p className="muted">Regroup and rank also cleans recognized exam instructions from existing entries, preserves admin edits and exclusions, and rebuilds the rankings. Use Correct Questions to review ambiguous entries.</p>
     <p className="muted">Extracted questions are grouped and ranked after each paper is processed. Regroup a course here after fixing its papers or questions.</p>
     {error && <p className="notice error" role="alert">{errors[error] ?? errors.unexpected}</p>}
     {rebuiltCourse && <p className="notice" role="status">Regrouped {rebuiltCourse.code}: {Number(groups) || 0} distinct questions. <Link href={`/courses/${rebuiltCourse.id}/questions`}>Open its question bank</Link></p>}

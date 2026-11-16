@@ -1,6 +1,7 @@
 import { CorrectionKind, type Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
+import { questionReviewReason } from "@/lib/question-content";
 import { logError } from "@/lib/logger";
 import { courseExams, rebuildQuestionBank } from "@/lib/question-bank";
 import { cleanCorrectedText, MAX_QUESTION_TEXT_LENGTH, normalizeLineEndings, type CorrectionRefusal } from "@/lib/question-correction-rules";
@@ -25,7 +26,7 @@ export const correctionLimit = () => limitFromEnv("CORRECTION_RATE_LIMIT_PER_MIN
 const errorType = (error: unknown) => (error instanceof Error ? error.name : "Unknown");
 
 const questionSelect = {
-  id: true, number: true, text: true, splitOut: true, pinnedToQuestionId: true, textCorrectedAt: true,
+  id: true, number: true, text: true, excludedFromBank: true, splitOut: true, pinnedToQuestionId: true, textCorrectedAt: true,
   file: { select: { id: true, title: true, year: true } },
 } satisfies Prisma.QuestionSelect;
 
@@ -53,7 +54,7 @@ export async function getCorrectionPage(courseId: string, { page: requestedPage 
       if (!course) return null;
       const totalPages = Math.max(1, Math.ceil(total / CORRECTION_PAGE_SIZE));
       const page = Number.isInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, totalPages) : 1;
-      const [groups, totalPapers, log] = await Promise.all([
+      const [groups, totalPapers, log, ungrouped] = await Promise.all([
         db.questionGroup.findMany({
           where, orderBy: { rank: "asc" }, skip: (page - 1) * CORRECTION_PAGE_SIZE, take: CORRECTION_PAGE_SIZE,
           select: {
@@ -63,8 +64,9 @@ export async function getCorrectionPage(courseId: string, { page: requestedPage 
         }),
         db.courseFile.count({ where: { ...courseExams(courseId), questions: { some: {} } } }),
         db.questionCorrection.findMany({ where: { courseId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: CORRECTION_LOG_SIZE, select: logSelect }),
+        db.question.findMany({ where: { file: courseExams(courseId), OR: [{ groupId: null }, { excludedFromBank: true }], ...(keyword ? { text: { contains: escapeLike(keyword), mode: "insensitive" as const } } : {}) }, select: questionSelect, orderBy: [{ fileId: "asc" }, { number: "asc" }], take: CORRECTION_PAGE_SIZE }),
       ]);
-      return { course, groups, total, page, totalPages, totalPapers, log, query: keyword };
+      return { course, groups, total, page, totalPages, totalPapers, log, ungrouped, query: keyword };
     } catch (error) {
       logError("question_correction_retrieval_failed", { courseId, errorType: errorType(error) });
       throw error;
@@ -85,7 +87,7 @@ export async function getQuestionCorrection(courseId: string, questionId: string
       db.questionGroup.findMany({ where: { courseId, questions: { some: { file: PUBLISHED_FILES } } }, orderBy: { rank: "asc" }, select: { id: true, rank: true, text: true } }),
       db.questionCorrection.findMany({ where: { questionId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: CORRECTION_LOG_SIZE, select: logSelect }),
     ]);
-    return { course, question, groups, history };
+    return { course, question, groups, history, reviewReason: questionReviewReason(question.text) };
   } catch (error) {
     logError("question_correction_retrieval_failed", { courseId, questionId, errorType: errorType(error) });
     throw error;
@@ -96,7 +98,8 @@ export type Correction =
   | { kind: "edit"; questionId: string; text: string; previousText: string }
   | { kind: "move"; questionId: string; groupId: string }
   | { kind: "split"; questionId: string }
-  | { kind: "reset"; questionId: string };
+  | { kind: "reset"; questionId: string }
+  | { kind: "exclude" | "restore"; questionId: string };
 
 export type CorrectionOutcome = { ok: true; regrouped: boolean } | { ok: false; error: CorrectionRefusal };
 
@@ -135,7 +138,7 @@ async function applyCorrection(tx: Tx, adminId: string, courseId: string, correc
   const question = await tx.question.findFirst({
     where: { id: correction.questionId, file: courseExams(courseId) },
     select: {
-      id: true, number: true, text: true, groupId: true, splitOut: true, pinnedToQuestionId: true,
+      id: true, number: true, text: true, groupId: true, excludedFromBank: true, splitOut: true, pinnedToQuestionId: true,
       file: { select: { title: true } }, group: { select: { text: true } }, pinnedQuestions: { select: { id: true } },
     },
   });
@@ -145,7 +148,13 @@ async function applyCorrection(tx: Tx, adminId: string, courseId: string, correc
   });
   const groupText = question.group?.text ?? null;
 
-  if (correction.kind === "edit") {
+  if (correction.kind === "exclude" || correction.kind === "restore") {
+    const excluded = correction.kind === "exclude";
+    if (question.excludedFromBank === excluded) throw new Refused(excluded ? "already_excluded" : "not_excluded");
+    await keepFollowersInPlace(tx, question);
+    await tx.question.update({ where: { id: question.id }, data: { excludedFromBank: excluded, groupId: null, pinnedToQuestionId: null, splitOut: false } });
+    await record(excluded ? CorrectionKind.EXCLUDE : CorrectionKind.RESTORE, groupText, null);
+  } else if (correction.kind === "edit") {
     const current = cleanCorrectedText(question.text);
     if (current !== cleanCorrectedText(correction.previousText)) throw new Refused("stale");
     if (current === correction.text) throw new Refused("text_unchanged");

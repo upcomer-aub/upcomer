@@ -278,6 +278,8 @@ model Question {
   pinnedTo           Question?            @relation("QuestionPin", fields: [pinnedToQuestionId], references: [id], onDelete: SetNull)
   pinnedQuestions    Question[]           @relation("QuestionPin")
   splitOut           Boolean              @default(false)
+  // Admin exclusions survive processing and regrouping without deleting source/history.
+  excludedFromBank   Boolean              @default(false)
   // Set when an admin corrected the extracted text.
   textCorrectedAt    DateTime?
   corrections        QuestionCorrection[]
@@ -294,6 +296,8 @@ model Question {
 }
 
 enum CorrectionKind {
+  EXCLUDE
+  RESTORE
   EDIT_TEXT
   MOVE
   SPLIT

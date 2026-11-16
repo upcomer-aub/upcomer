@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CorrectionLog, CorrectionTags } from "@/components/correction-log";
 import { requireAdmin } from "@/lib/auth";
-import { editQuestionTextAction, moveQuestionAction, resetQuestionGroupAction, splitQuestionAction } from "@/lib/question-correction-actions";
+import { excludeQuestionAction, restoreQuestionAction, editQuestionTextAction, moveQuestionAction, resetQuestionGroupAction, splitQuestionAction } from "@/lib/question-correction-actions";
 import { correctionMessage, MAX_QUESTION_TEXT_LENGTH, REGROUP_FAILED_MESSAGE, savedMessage } from "@/lib/question-correction-rules";
 import { getQuestionCorrection } from "@/lib/question-corrections";
 
@@ -26,7 +26,7 @@ export default async function QuestionCorrectionPage({ params, searchParams }: {
   await requireAdmin(`${courseRoute}/${encodeURIComponent(questionId)}`);
   const view = await getQuestionCorrection(courseId, questionId);
   if (!view) notFound();
-  const { course, question, groups, history } = view;
+  const { course, question, groups, history, reviewReason } = view;
   const label = `${question.file.title}, question ${question.number}`;
   const hidden = <><input type="hidden" name="courseId" value={course.id} /><input type="hidden" name="questionId" value={question.id} /></>;
   const otherGroups = groups.filter(group => group.id !== question.group?.id);
@@ -34,10 +34,20 @@ export default async function QuestionCorrectionPage({ params, searchParams }: {
     <span className="eyebrow">Admin · {course.code}</span><h1>Correct a Question</h1>
     <p className="muted">{label} <CorrectionTags question={question} /></p>
     <Notice {...notice} />
+    {reviewReason && <p className="notice" role="status">{reviewReason}</p>}
+    <section className="card" aria-label="Question eligibility">
+      {question.excludedFromBank ? <form action={restoreQuestionAction}>{hidden}
+        <p>This entry is excluded from rankings and practice. Its source and correction history are preserved.</p>
+        <button className="button" type="submit">Restore entry</button>
+      </form> : <form action={excludeQuestionAction}>{hidden}
+        <p>If this is an exam rule, heading, or other non-question text, exclude it from rankings and practice. You can undo this later.</p>
+        <button className="button" type="submit">Exclude: not a question</button>
+      </form>}
+    </section>
     <section className="card" aria-label="Current group">
       <h2>Group</h2>
       {question.group ? <p>#{question.group.rank} “{question.group.text}”, in {question.group.paperCount} {question.group.paperCount === 1 ? "paper" : "papers"}.</p>
-        : <p className="muted">Not in any group: no text is left once its number is removed.</p>}
+        : <p className="muted">Not in any group: the entry is excluded or contains no usable question text.</p>}
     </section>
     <form className="card form" action={editQuestionTextAction}>
       {hidden}
@@ -47,7 +57,7 @@ export default async function QuestionCorrectionPage({ params, searchParams }: {
       </label>
       <button className="button" type="submit">Save text</button>
     </form>
-    {otherGroups.length > 0 && <form className="card form" action={moveQuestionAction}>
+    {!question.excludedFromBank && otherGroups.length > 0 && <form className="card form" action={moveQuestionAction}>
       {hidden}
       <label className="field">Move to group
         <select name="groupId" required defaultValue="">
@@ -58,7 +68,7 @@ export default async function QuestionCorrectionPage({ params, searchParams }: {
       <button className="button" type="submit">Move question</button>
     </form>}
     <section className="card" aria-label="Group corrections">
-      {!question.splitOut && <form action={splitQuestionAction}>{hidden}
+      {!question.excludedFromBank && !question.splitOut && <form action={splitQuestionAction}>{hidden}
         <p className="muted">Split it out if it is a different question from the others in its group.</p>
         <button className="button" type="submit">Split into its own group</button>
       </form>}

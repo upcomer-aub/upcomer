@@ -33,3 +33,11 @@ export async function splitQuestionAction(formData: FormData) {
 export async function resetQuestionGroupAction(formData: FormData) {
   await run(formData, questionId => ({ kind: "reset", questionId }));
 }
+
+export async function excludeQuestionAction(formData: FormData) {
+  await run(formData, questionId => ({ kind: "exclude", questionId }));
+}
+
+export async function restoreQuestionAction(formData: FormData) {
+  await run(formData, questionId => ({ kind: "restore", questionId }));
+}

@@ -1,3 +1,4 @@
+import { cleanExtractedQuestion, isExamBoilerplate, isInstructionHeading, isUsableQuestion } from "@/lib/question-content";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export type ExtractionReason = "no_text" | "no_questions" | "unreadable_pdf" | "unsupported_type";
@@ -20,7 +21,6 @@ export const isPageFurniture = (line: string) =>
 
 // "Part B", "Section II: Problems", or a bare "Questions" end the question above them and are not part of any question.
 const SECTION_HEADING = /^(?:(?:part|section)\s+(?:[a-z]|[ivx]{1,4}|\d{1,2})\s*(?:[:.(-].*)?|questions|problems|exercises)\s*:?$/i;
-const INSTRUCTIONS_HEADING = /^(?:general\s+)?instructions\s*:?$/i;
 const questionNumber = (line: string) => Number(/^(?:Q(?:uestion)?\s*)?\(?(\d{1,3})/i.exec(line)?.[1]);
 
 export function questionsFromLines(lines: string[]) {
@@ -30,17 +30,21 @@ export function questionsFromLines(lines: string[]) {
   let held: string[] | null = null;
   let current: string[] = [];
   const close = () => {
-    if (current.length) (held ?? questions).push(current.join("\n"));
+    const text = cleanExtractedQuestion(current.join("\n"));
+    if (isUsableQuestion({ text })) (held ?? questions).push(text);
     current = [];
   };
   for (const line of lines.map(line => line.trim()).filter(Boolean)) {
     if (isPageFurniture(line)) continue;
-    if (INSTRUCTIONS_HEADING.test(line)) {
+    if (isInstructionHeading(line)) {
       close();
       held ??= [];
     } else if (SECTION_HEADING.test(line)) {
       close();
       held = null;
+    } else if (isExamBoilerplate(line)) {
+      // A numbered rule must also end the preceding candidate; never attach its continuation to a real question.
+      if (QUESTION_START.test(line)) close();
     } else if (QUESTION_START.test(line)) {
       close();
       if (held?.length && questionNumber(line) === 1) held = null;

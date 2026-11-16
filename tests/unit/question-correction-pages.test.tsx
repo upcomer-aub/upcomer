@@ -9,7 +9,7 @@ vi.mock("@/lib/auth", () => ({ requireAdmin }));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("@/lib/question-corrections", () => ({ getCorrectionPage, getQuestionCorrection }));
 vi.mock("@/lib/question-correction-actions", () => ({
-  editQuestionTextAction: vi.fn(), moveQuestionAction: vi.fn(), splitQuestionAction: vi.fn(), resetQuestionGroupAction: vi.fn(),
+  excludeQuestionAction: vi.fn(), restoreQuestionAction: vi.fn(), editQuestionTextAction: vi.fn(), moveQuestionAction: vi.fn(), splitQuestionAction: vi.fn(), resetQuestionGroupAction: vi.fn(),
 }));
 import CourseQuestionCorrectionsPage from "@/app/admin/questions/[courseId]/page";
 import QuestionCorrectionPage from "@/app/admin/questions/[courseId]/[questionId]/page";
@@ -108,5 +108,26 @@ describe("question correction page", () => {
   it("shows a not found page for a question that is not in the course", async () => {
     getQuestionCorrection.mockResolvedValue(null);
     await expect(renderQuestion()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+});
+
+
+describe("non-question review controls", () => {
+  it("offers reversible exclusion and explains an automatic review flag", async () => {
+    getQuestionCorrection.mockResolvedValue({ ...questionView, reviewReason: "Check this entry", question: { ...questionView.question, excludedFromBank: false } });
+    const html = await renderQuestion();
+    expect(html).toContain("Exclude: not a question");
+    expect(html).toContain("Check this entry");
+    getQuestionCorrection.mockResolvedValue({ ...questionView, question: { ...questionView.question, excludedFromBank: true } });
+    const excluded = await renderQuestion();
+    expect(excluded).toContain("Restore entry");
+    expect(excluded).toContain("Excluded: not a question");
+    expect(excluded).not.toContain("Exclude: not a question</button>");
+  });
+  it("keeps excluded entries discoverable on the course review page", async () => {
+    getCorrectionPage.mockResolvedValue({ ...listView, ungrouped: [{ ...tcp, excludedFromBank: true }] });
+    const html = await renderList();
+    expect(html).toContain("Excluded and ungrouped entries");
+    expect(html).toContain("Review entry");
   });
 });

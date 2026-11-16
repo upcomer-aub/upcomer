@@ -472,6 +472,24 @@ After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One mi
 - **Tests:** `tests/unit/advice-reports.test.ts`, the report cases in `tests/unit/advice-feed-page.test.tsx`, `tests/integration/advice-reports.test.ts` (including a double-click race), `tests/e2e/advice-reports.spec.ts`, the report API in `npm run availability`, and `npm run load -- advice-report`. Details: `ADVICE_REPORTS_REPORT.md`.
 - **Shared files changed:** `prisma/schema.prisma` (the model, two enums, back-relations on `User`, `Course`, and `Advice`), the migration, `lib/advice.ts` (`adviceSelect` exported), `components/advice-list.tsx` (the report link), `app/courses/[courseId]/advice/page.tsx` (the notices), `lib/logger.ts` (four events), `tests/availability/run.ts`, `.env.example`, and `README.md`.
 
+### Moderating reported advice (US-77, Mohammed Al-Haiqi, Sprint 4)
+
+Admins open `/admin/advice-reports` (linked from the catalog as "Advice reports"; no migration, it uses US-43's `AdviceReport`). Each advice with open reports is shown once, the one reported longest ago first, 20 a page: the advice as students see it, how many students reported it, the reasons, and their details. The admin decides:
+
+- **Remove advice:** the advice becomes `REMOVED` (`removedById` = the admin) and leaves every student-facing list at once (the feed's cache is cleared); all its open reports become `RESOLVED`.
+- **Keep advice:** the advice stays; all its open reports become `DISMISSED`. Students can report it again later.
+- Advice its author deleted after it was reported is marked so, with only **Close reports**.
+
+Rules:
+
+- **Admins only.** The page and the action call `requireAdmin()`: a student gets the not-found page, also when sending the admin's form with its real action ID (tested end to end), and a visitor is sent to log in.
+- **Minimum information.** The queue shows the advice as students see it, so an anonymous author stays anonymous here too, and never shows who reported it. The author and reporter are kept in the database for abuse handling outside this page.
+- **One decision.** A decision only closes open reports, so when two admins decide at once (or one decides from a page opened before another's decision), the second changes nothing and is told the advice has no open reports any more. An admin cannot remove advice nobody reported from this page.
+- **DoS protection.** At most `ADVICE_MODERATION_RATE_LIMIT_PER_MINUTE` decisions (default 60) per admin per minute.
+- **Logs.** `advice_removed_by_admin` and `advice_reports_dismissed` (info, with how many reports were closed), `advice_moderation_refused`, `advice_moderation_rate_limited` (warn), `advice_moderation_failed` and `advice_report_queue_failed` (error), with IDs only, never the advice text or a note. Timed as `advice_report_queue` and `advice_moderation`.
+
+The service is `lib/advice-moderation.ts`, the action `lib/advice-moderation-actions.ts`, and the page `app/admin/advice-reports/page.tsx`. Tests: `tests/unit/advice-moderation.test.ts`, `tests/unit/advice-moderation-page.test.tsx`, `tests/integration/advice-moderation.test.ts`, and `tests/e2e/advice-moderation.spec.ts`; the load test is `npm run load -- advice-moderation`. Details and results: `ADVICE_MODERATION_REPORT.md`.
+
 ### Advice from previous students (US-34, US-35, US-37, US-39): open issues
 
 Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advice-rules.ts`), now owned by Mustafa Ergaibi. A review against the stories found no acceptance failure in the code: scopes are checked against the course, only `https://` links are accepted, an anonymous post never carries its author's name or ID to students, and search and filters stay inside the course. These issues are open and **not fixed yet**:
@@ -483,7 +501,7 @@ Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advi
 5. `advice_published` logs the author's `userId` with the `adviceId` for anonymous posts too. Only admins read logs and US-37 keeps the author for moderation, but it needs a decision.
 6. The exam filter finds advice scoped to that exam only, not advice on one of its questions.
 7. The publish form offers only the 100 most frequent questions of a course.
-8. Nothing removes or edits advice yet (the `REMOVED` status has no caller); that belongs to other stories. *(Authors edit and delete since US-36, above.)*
+8. Nothing removes or edits advice yet (the `REMOVED` status has no caller); that belongs to other stories. *(Authors edit and delete since US-36, and admins remove reported advice since US-77, above.)*
 
 ### Known limitations
 
@@ -807,6 +825,9 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_submitted` | info | `reportId`, `adviceId`, `courseId`, `category` (the reason), `userId`; never the note |
 | Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_refused`, `advice_report_rate_limited` | warn | `adviceId`, `userId`, `reason` (`invalid_reason`, `note_too_long`, `not_found`, `own_advice`, `duplicate`) or `retryAfterSeconds` |
 | Mohammed Al-Haiqi (Sprint 4, US-43) | `advice_report_failed` | error | `adviceId`, `userId`, `errorType` |
+| Mohammed Al-Haiqi (Sprint 4, US-77) | `advice_removed_by_admin`, `advice_reports_dismissed` | info | `adviceId`, `courseId`, `adminId`, the number of reports closed |
+| Mohammed Al-Haiqi (Sprint 4, US-77) | `advice_moderation_refused`, `advice_moderation_rate_limited` | warn | `adviceId`, `adminId`, `decision`, `reason` (`invalid_decision`, `not_found`: no open reports any more) or `retryAfterSeconds` |
+| Mohammed Al-Haiqi (Sprint 4, US-77) | `advice_moderation_failed`, `advice_report_queue_failed` | error | `adviceId`, `adminId`, `errorType` |
 
 ### What is never logged
 

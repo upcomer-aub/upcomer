@@ -109,6 +109,9 @@ type LogEvent =
   | "topic_covered_save_failed"
   | "mock_exam_weighting_failed"
   | "mock_exam_weighting_invalid_inputs"
+  | "mock_exam_timer_started"
+  | "mock_exam_expired"
+  | "mock_exam_late_save_refused"
   | "mock_exam_created"
   | "mock_exam_refused"
   | "mock_exam_rate_limited"
@@ -264,6 +267,11 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   // reason codes, and error types only; topics and questions are never logged.
   mock_exam_weighting_failed: "error",
   mock_exam_weighting_invalid_inputs: "warn",
+  // Mustafa Ergaibi (Sprint 4): timed mock exam mode (US-48). IDs, the time limit, counts, the trigger, and how late a
+  // refused save was only; answers and questions are never logged.
+  mock_exam_timer_started: "info",
+  mock_exam_expired: "info",
+  mock_exam_late_save_refused: "warn",
   // Sprint 4: configurable mock exams (US-45; Ali Shammakh, taken over by Mustafa Ergaibi). IDs, the settings (length,
   // difficulty, a topic count), reason codes, and error types only; question text and answers are never logged.
   mock_exam_created: "info",

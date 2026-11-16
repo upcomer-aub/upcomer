@@ -1,6 +1,8 @@
 // Mock exam rules shared by the server, the actions, and the browser form (US-45): limits, messages, and the types of the
 // question selection. The selection itself is in lib/mock-exam-mix.ts (server only). No database access here.
 
+import { isTimeLimit, MOCK_EXAM_TIME_LIMITS, TIME_UP_NOTICE } from "@/lib/mock-exam-timing";
+
 export const MOCK_EXAM_MIN_LENGTH = 3;
 export const MOCK_EXAM_MAX_LENGTH = 50;
 export const MOCK_EXAM_DEFAULT_LENGTH = 10;
@@ -16,8 +18,10 @@ export const DIFFICULTY_LABELS: Record<MockExamDifficultyName, string> = { EASY:
 export const DIFFICULTY_HELP = "Difficulty is estimated from each question's length and number of parts, because past papers carry no difficulty rating.";
 
 export type MockExamError =
-  | "course_not_found" | "no_questions" | "topic_invalid" | "length_invalid" | "difficulty_invalid" | "not_enough_questions" | "rate_limited" | "unexpected";
-export type SittingError = "not_found" | "already_submitted" | "answer_too_long" | "unexpected";
+  | "course_not_found" | "no_questions" | "topic_invalid" | "length_invalid" | "difficulty_invalid" | "time_limit_invalid" | "not_enough_questions" | "rate_limited"
+  | "unexpected";
+// `time_up`: the exam's time ran out (US-48), so nothing was saved. `not_started`: a timed exam before Start was pressed.
+export type SittingError = "not_found" | "already_submitted" | "answer_too_long" | "time_up" | "not_started" | "unexpected";
 
 export function mockExamMessage(error: string, available?: number) {
   switch (error) {
@@ -26,6 +30,7 @@ export function mockExamMessage(error: string, available?: number) {
     case "topic_invalid": return "One of the topics you picked isn't a topic of this course. Choose again.";
     case "length_invalid": return `Choose between ${MOCK_EXAM_MIN_LENGTH} and ${MOCK_EXAM_MAX_LENGTH} questions.`;
     case "difficulty_invalid": return "Choose a difficulty from the list.";
+    case "time_limit_invalid": return `Choose a time limit from the list (${MOCK_EXAM_TIME_LIMITS[0]} to ${MOCK_EXAM_TIME_LIMITS[MOCK_EXAM_TIME_LIMITS.length - 1]} minutes), or no time limit.`;
     // A request larger than the topics can fill gets the largest exam they allow; this is left for when nothing matches.
     case "not_enough_questions": return available ? `Only ${available} ${available === 1 ? "question matches" : "questions match"} your topics. Choose more topics.`
       : "No question matches your topics, so a mock exam can't be made. Choose more topics.";
@@ -65,13 +70,16 @@ export function sittingMessage(error: string) {
     case "not_found": return "That mock exam doesn't exist.";
     case "already_submitted": return "This exam was already submitted, so its answers can't change.";
     case "answer_too_long": return `Keep each answer to ${MOCK_ANSWER_MAX_LENGTH} characters or fewer.`;
+    case "time_up": return TIME_UP_NOTICE;
+    case "not_started": return "Start the exam before you answer.";
     default: return "Your answers could not be saved. Please try again.";
   }
 }
 
 // `generated` is how many of the student's generated practice questions (US-44) an exam could use; 0 for a visitor.
 export type MockExamOptions = { total: number; topics: { key: string; label: string; count: number }[]; generated: number };
-export type MockExamFormValues = { length: string; difficulty: string; topics: string[]; includeGenerated: boolean };
+// `timeLimit` is the minutes as typed, or "" for no time limit (US-48).
+export type MockExamFormValues = { length: string; difficulty: string; topics: string[]; includeGenerated: boolean; timeLimit?: string };
 
 // One question the exam can be drawn from: a question of the course's consolidated exam with its topic.
 export type PoolQuestion = {
@@ -116,16 +124,20 @@ export const generatedShare = (length: number) => Math.floor(length / 2);
 const normalizeTopicKey = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
 
 // Checks the settings as typed in the form. Topic keys are only normalized here; whether they exist is checked against the
-// course's questions by selectMockQuestions.
-export function parseMockExamConfig(input: { length: string; difficulty: string; topics: string[]; includeGenerated?: boolean }):
-  { ok: true; config: MockConfig } | { ok: false; error: "length_invalid" | "difficulty_invalid" } {
+// course's questions by selectMockQuestions. The time limit (US-48) is returned beside the config, not in it: the question
+// selection never sees it, so a timed exam has exactly the questions of an untimed one.
+export function parseMockExamConfig(input: { length: string; difficulty: string; topics: string[]; includeGenerated?: boolean; timeLimit?: string }):
+  { ok: true; config: MockConfig; timeLimitMinutes: number | null } | { ok: false; error: "length_invalid" | "difficulty_invalid" | "time_limit_invalid" } {
   const raw = input.length.trim();
   const length = /^\d{1,3}$/.test(raw) ? Number(raw) : NaN;
   if (!Number.isInteger(length) || length < MOCK_EXAM_MIN_LENGTH || length > MOCK_EXAM_MAX_LENGTH) return { ok: false, error: "length_invalid" };
   const difficulty = input.difficulty.trim().toUpperCase();
   if (!isDifficultyName(difficulty)) return { ok: false, error: "difficulty_invalid" };
+  const limit = (input.timeLimit ?? "").trim();
+  const timeLimitMinutes = limit === "" ? null : /^\d{1,3}$/.test(limit) ? Number(limit) : NaN;
+  if (timeLimitMinutes !== null && !isTimeLimit(timeLimitMinutes)) return { ok: false, error: "time_limit_invalid" };
   const topicKeys = [...new Set(input.topics.slice(0, 200).map(normalizeTopicKey).filter(Boolean))];
-  return { ok: true, config: { topicKeys, length, difficulty, includeGenerated: input.includeGenerated === true } };
+  return { ok: true, config: { topicKeys, length, difficulty, includeGenerated: input.includeGenerated === true }, timeLimitMinutes };
 }
 
 // The source question that stands for a question-bank group in a mock exam, for US-49's learning events. A fixed rule, so

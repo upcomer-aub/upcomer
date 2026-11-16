@@ -142,19 +142,29 @@ test("only a reply's author or an admin can delete it; another student is refuse
   await adminContext.close();
 });
 
-test("a post removed by an admin hides its thread, and a stale reply form is refused (acceptance test 2)", async ({ page }) => {
+test("a post removed by an admin hides its thread, and a stale reply form is refused (acceptance test 2)", async ({ page, browser }) => {
   await logIn(page, users.first.email);
   await page.goto(advicePage);
   const details = await openThread(page, anonymous.title);
   await details.getByLabel("Your reply").fill(`Posted after removal ${stamp}`);
-  // An admin removes the post (US-77's action is not built yet, so the status is set directly).
-  await db.advice.update({ where: { id: anonymous.id }, data: { status: "REMOVED", removedAt: new Date() } });
+  // US-77 is integrated: use the real moderation flow, which also invalidates the cached feed.
+  await db.adviceReport.create({ data: { adviceId: anonymous.id, courseId, reporterId: users.second.id, reason: "SPAM" } });
+  const adminContext = await browser.newContext();
+  try {
+    const admin = await adminContext.newPage();
+    await logInAsAdmin(admin);
+    await admin.goto("/admin/advice-reports");
+    const queued = admin.getByRole("list", { name: "Reported advice" }).getByRole("listitem").filter({ hasText: anonymous.title });
+    await queued.getByRole("button", { name: "Remove advice" }).click();
+    await expect(admin).toHaveURL(/\/admin\/advice-reports\?removed=1$/);
+  } finally {
+    await adminContext.close();
+  }
   await details.getByRole("button", { name: "Post reply" }).click();
   await expect(notice(page)).toHaveText("That advice or reply is no longer available.");
   await expect(post(page, anonymous.title)).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(`When was the midterm? ${stamp}`);
   expect(await db.adviceComment.count({ where: { adviceId: anonymous.id, body: { contains: "after removal" } } })).toBe(0);
-  await db.advice.update({ where: { id: anonymous.id }, data: { status: "VISIBLE", removedAt: null } });
 });
 
 for (const colorScheme of ["light", "dark"] as const) {
@@ -162,8 +172,8 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
     await page.setViewportSize({ width: 375, height: 800 });
     await logIn(page, users.first.email);
-    await page.goto(`${advicePage}?thread=${anonymous.id}`);
-    const details = thread(page, anonymous.title);
+    await page.goto(`${advicePage}?thread=${named.id}`);
+    const details = thread(page, named.title);
     await expect(details).toHaveAttribute("open", "");
     await expect(details.getByLabel("Your reply")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

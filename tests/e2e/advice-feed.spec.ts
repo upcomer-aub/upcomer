@@ -131,7 +131,7 @@ test("an anonymous author's name and every author ID stay out of the page", asyn
 test("a visitor can read the feed and is asked to log in to publish", async ({ page }) => {
   await page.goto(feed);
   await expect(posts(page)).toHaveCount(5);
-  await expect(page.getByRole("main").getByRole("link", { name: "Log in" })).toHaveAttribute("href", `/login?next=${encodeURIComponent(feed)}`);
+  await expect(page.getByRole("main").getByRole("link", { name: "Log in", exact: true })).toHaveAttribute("href", `/login?next=${encodeURIComponent(feed)}`);
 });
 
 test("21 advice make two pages of 20 and 1, with no advice twice", async ({ page }) => {

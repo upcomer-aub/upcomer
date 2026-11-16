@@ -152,7 +152,15 @@ type LogEvent =
   | "advice_comment_retrieval_failed"
   | "mock_exam_version_created"
   | "mock_exam_version_refused"
-  | "mock_exam_version_failed";
+  | "mock_exam_version_failed"
+  | "mock_exam_marked"
+  | "mock_exam_marking_failed"
+  | "mock_exam_marking_evidence_failed"
+  | "answer_key_saved"
+  | "answer_key_removed"
+  | "answer_key_refused"
+  | "answer_key_rate_limited"
+  | "answer_key_save_failed";
 
 
 export type { LogEvent };
@@ -352,6 +360,16 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   mock_exam_version_created: "info",
   mock_exam_version_refused: "warn",
   mock_exam_version_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): marking mock exams against answer keys (US-49). IDs, counts and reasons only; never an
+  // answer, a key point, or an explanation.
+  mock_exam_marked: "info",
+  mock_exam_marking_failed: "error",
+  mock_exam_marking_evidence_failed: "error",
+  answer_key_saved: "info",
+  answer_key_removed: "info",
+  answer_key_refused: "warn",
+  answer_key_rate_limited: "warn",
+  answer_key_save_failed: "error",
 
 };
 

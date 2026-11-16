@@ -16,6 +16,9 @@ vi.mock("@/lib/auth", () => ({ requireUser: mocks.requireUser, getCurrentUser: m
 vi.mock("@/lib/courses", () => ({ getCourseById: mocks.getCourseById }));
 // US-46 (Lea Tass): the exam page also reads the exam's versions; one version here, so these tests are unchanged.
 vi.mock("@/lib/mock-exam-versions", () => ({ getMockExamVersions: vi.fn(async () => ({ current: 1, versions: [] })) }));
+
+// US-49 marks a submitted exam; its own tests are in tests/unit/mock-marking*.test.ts*.
+vi.mock("@/lib/mock-marking", () => ({ markMockExam: async () => ({ ok: false, error: "unexpected" }) }));
 vi.mock("@/lib/mock-exams", () => ({
   getMockExamOptions: mocks.getMockExamOptions, listMyMockExams: mocks.listMyMockExams, getMockExam: mocks.getMockExam,
   createMockExam: mocks.createMockExam, saveMockExam: mocks.saveMockExam, startMockExam: mocks.startMockExam,

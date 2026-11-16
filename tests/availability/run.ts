@@ -52,6 +52,7 @@ type User = { id: string; email: string; name: string; client: Client };
 // own (anonymous) advice in the first course, which they open and edit (US-36).
 type World = {
   courses: Course[]; files: string[]; users: User[]; actions: { logIn: string; addCourse: string; editAdvice: string; reportAdvice: string };
+  marking: { stamp: string; exams: Map<string, string> };
   advice: { stamp: string; hiddenAuthor: string; own: Map<string, string>; reportable: string };
 };
 let adviceEdits = 0;
@@ -125,6 +126,14 @@ const APIS: Api[] = [
   { name: "GET /admin/advice-reports (student refused)", weight: 2, async run(user) {
     const reply = await user.client.get("/admin/advice-reports", TIMEOUT_MS);
     return { reply, expected: [404], correct: !reply.body.includes("Advice Reports") && !reply.body.includes("Remove advice") };
+  } },
+  // US-49: correct only when the user's own marked exam shows its marks and explanations, and the unkeyed question is
+  // flagged as not marked.
+  { name: "GET /courses/:courseId/mock-exams/:mockExamId (marked exam)", weight: 5, async run(user, world) {
+    const reply = await user.client.get(`/courses/${world.courses[0].id}/mock-exams/${world.marking.exams.get(user.id)}`, TIMEOUT_MS);
+    const correct = reply.body.includes(`${world.marking.stamp} question for ${user.id}`) && reply.body.includes("Partly correct")
+      && reply.body.includes("Not marked: no answer key") && reply.body.includes("Your answer does not cover");
+    return { reply, expected: [200], correct };
   } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
@@ -407,10 +416,26 @@ async function main() {
     const reportPage = await users[0].client.get(`/courses/${courses[0].id}/advice/${reportable}/report`);
     const login = await new Client(BASE_URL).get("/login");
     const coursePage = await users[0].client.get(`/courses/${courses[0].id}`);
+    // Each user's submitted, marked mock exam (US-49). Deleting the users at the end deletes them.
+    const markedExams = new Map(users.map(user => [user.id, `${stamp.toLowerCase()}-mock-${user.id}`]));
+    const now = new Date();
+    await db.mockExam.createMany({ data: users.map(user => ({
+      id: markedExams.get(user.id)!, userId: user.id, courseId: courses[0].id, topicKeys: [], topics: [], length: 3, difficulty: "MIXED" as const,
+      status: "SUBMITTED" as const, submittedAt: now, markedAt: now,
+    })) });
+    await db.mockExamQuestion.createMany({ data: users.flatMap(user => [
+      { outcome: "CORRECT" as const, matchedPoints: ["three-way handshake"], missedPoints: [], feedback: null },
+      { outcome: "PARTIAL" as const, matchedPoints: ["slow start"], missedPoints: ["congestion avoidance"], feedback: 'Your answer does not cover: "congestion avoidance".' },
+      { outcome: "NO_KEY" as const, matchedPoints: [], missedPoints: [], feedback: "This question has no answer key yet, so your answer was not marked." },
+    ].map((marking, index) => ({
+      mockExamId: markedExams.get(user.id)!, position: index + 1, text: `${stamp} question for ${user.id} ${index + 1}`, paperCount: 1, totalPapers: 1,
+      sourcePapers: [], answer: "An answer.", answeredAt: now, markedAt: now, ...marking,
+    }))) });
     const world: World = {
       courses, files, users, actions: { logIn: actionIdFor(login.body, "Log in"), addCourse: actionIdFor(coursePage.body, "Add to My Courses"), editAdvice: actionIdFor(editPage.body, "Save changes"),
         reportAdvice: actionIdFor(reportPage.body, "Send report") },
       advice: { stamp, hiddenAuthor: users[0].name, own, reportable },
+      marking: { stamp, exams: markedExams },
     };
     // Each route's first request on a fresh server is slow (code loaded, caches empty); that is start-up, not availability,
     // so every API is called twice before measuring.

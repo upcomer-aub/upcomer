@@ -3,6 +3,7 @@ import { MockExamTimer } from "@/components/mock-exam-timer";
 import type { MockExamView } from "@/lib/mock-exams";
 import { MOCK_ANSWER_MAX_LENGTH } from "@/lib/mock-exam-rules";
 import { timeLimitLabel } from "@/lib/mock-exam-timing";
+import { OUTCOME_LABELS } from "@/lib/mock-marking-rules";
 import styles from "./mock-exam-sitting.module.css";
 
 // The sitting flow: every question with a box for the answer. "Save progress" keeps the answers (they are still there after a
@@ -37,9 +38,15 @@ export function MockExamSitting({ exam }: { exam: MockExamView }) {
       <label className="field"><span>Your answer to question {question.position}</span>
         <textarea name={`answer_${question.id}`} defaultValue={question.answer ?? ""} rows={6} maxLength={MOCK_ANSWER_MAX_LENGTH} readOnly={submitted} />
       </label>
+      {/* US-49: the marking against the answer key, once the exam is marked. */}
+      {submitted && question.outcome && <div className={styles.marking} data-marking={question.outcome}>
+        <p><strong data-outcome>{OUTCOME_LABELS[question.outcome]}</strong></p>
+        {question.matchedPoints.length > 0 && <p className="muted">Covered: {question.matchedPoints.map(point => `"${point}"`).join("; ")}</p>}
+        {question.feedback && <p className={styles.feedback}>{question.feedback}</p>}
+      </div>}
     </li>)}</ol>
     {submitted
-      ? <p className="muted">{exam.timedOut ? "Time ran out, so the answers saved by then were submitted. They are locked." : "Submitted. Your answers are locked."}</p>
+      ? <p className="muted">{exam.timedOut ? "Time ran out, so the answers saved by then were submitted. They are locked." : "Submitted. Your answers are locked."}{exam.markedAt && " Each answer is marked only against the key points an admin wrote for the question; a question without a key is not marked."}</p>
       : <div className={styles.actions}>
         <button className="button" type="submit" name="intent" value="save">Save progress</button>
         <button className="button" type="submit" name="intent" value="submit">Submit exam</button>

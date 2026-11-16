@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser, requireUser } from "@/lib/auth";
 import { createMockExam, saveMockExam, startMockExam } from "@/lib/mock-exams";
 import type { MockExamError, MockExamFormValues, SittingError } from "@/lib/mock-exam-rules";
+import { markMockExam } from "@/lib/mock-marking";
 
 export type MockExamFormState = { status: "idle" | "error"; error?: MockExamError; available?: number; values?: MockExamFormValues };
 
@@ -60,5 +61,8 @@ export async function saveMockExamAction(formData: FormData) {
   const answers = answersOf(formData);
   const submit = field(formData, "intent") === "submit";
   const result = await saveMockExam(user.id, mockExamId, answers, submit);
+  // US-49: a submitted exam is marked at once. If marking fails the exam stays submitted and the exam page marks it on
+  // its next load (markMockExam is safe to repeat).
+  if (result.ok && submit) await markMockExam(user.id, mockExamId);
   redirect(`${route}?${new URLSearchParams(result.ok ? { [submit ? "submitted" : "saved"]: "1" } : { error: result.error })}`);
 }

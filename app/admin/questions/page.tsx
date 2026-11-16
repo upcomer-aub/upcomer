@@ -26,7 +26,7 @@ export default async function AdminQuestionsPage({ searchParams }: { searchParam
         <input type="hidden" name="courseId" value={course.id} />
         <button className="button" type="submit" aria-label={`Regroup and rank ${course.code}`}>Regroup and rank</button>
       </form>
-      <p className="catalog-links"><Link href={`/admin/questions/${encodeURIComponent(course.id)}`} aria-label={`Correct questions in ${course.code}`}>Correct questions</Link></p>
+      <p className="catalog-links"><Link href={`/admin/questions/${encodeURIComponent(course.id)}`} aria-label={`Correct questions in ${course.code}`}>Correct questions</Link>{" · "}<Link href={`/admin/answer-keys/${encodeURIComponent(course.id)}`} aria-label={`Answer keys for ${course.code}`}>Answer keys</Link></p>
     </li>)}</ul> : <p className="card muted">No questions have been extracted yet.</p>}
   </>;
 }

@@ -559,6 +559,28 @@ Rules:
 
 The service is `lib/advice-moderation.ts`, the action `lib/advice-moderation-actions.ts`, and the page `app/admin/advice-reports/page.tsx`. Tests: `tests/unit/advice-moderation.test.ts`, `tests/unit/advice-moderation-page.test.tsx`, `tests/integration/advice-moderation.test.ts`, and `tests/e2e/advice-moderation.spec.ts`; the load test is `npm run load -- advice-moderation`. Details and results: `ADVICE_MODERATION_REPORT.md`.
 
+### Marking mock exams and explaining mistakes (US-49, Mohammed Al-Haiqi, Sprint 4)
+
+After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One migration is new: `20261116000004_mock_marking` (the `AnswerKey` table, the `MarkOutcome` enum, `MockExam.markedAt`, and five additive columns on `MockExamQuestion`).
+
+**Acceptance (sprint plan):** marking and explanations are based on evidence; a missing rubric is flagged, not guessed.
+
+- **What answers are marked against.** Past papers come with no answer keys, and nothing is marked against a guess. An admin writes the answer key of a question-bank group at `/admin/answer-keys/:courseId` (linked as "Answer keys" from `/admin/questions`). A key is the key points a full answer covers, one per line (at most 10, 200 characters each), plus an optional explanation for students.
+- **How an answer is marked** (`markAnswer` in `lib/mock-marking-rules.ts`, pure). A key point is covered when every important word of it is in the answer, in any order. Case, accents, punctuation, stopwords and simple word endings are ignored ("routes", "routing" and "route" match), and a word inside another word does not count ("acknowledgement" is not "ACK"). The outcomes:
+  - `CORRECT`: every point is covered.
+  - `PARTIAL`: some points are covered.
+  - `INCORRECT`: no point is covered.
+  - `UNANSWERED`: the answer is empty.
+  - `NO_KEY`: the question has no key. It is shown as "Not marked: no answer key" and records no learning event. Every generated practice question (US-44) is `NO_KEY`, because it has no key.
+  - The explanation lists the missed points, then the admin's explanation. It is a transparent check of the key points, not a judgement of the whole answer, and the exam page says so.
+- **When.** Submitting marks the exam at once (`saveMockExamAction` calls `markMockExam` after `saveMockExam` succeeds). An exam that is submitted but not marked (submitted before this story, or the marking failed) is marked the next time its page opens. An exam is marked once: the write claims it (`SUBMITTED` and `markedAt` null), so two tabs or a retry mark it only once (mutation-checked). The marking is copied onto `MockExamQuestion` (`outcome`, `matchedPoints`, `missedPoints`, `feedback`), like the question text, so a later change to a key never changes a marked exam.
+- **Learning events (US-25's contract).** Each marked past-paper question records `recordLearningEvents(userId, courseId, [{ source: "MOCK_EXAM", eventId: "mock:<examId>:<position>", questionId, correct }])`, where `correct` means `CORRECT`. Partly correct, incorrect and unanswered all count as incorrect, and `NO_KEY` records nothing. The batch is all or nothing, so after a refusal (a source paper no longer published) the events are sent one by one and the refused ones are skipped and counted. If delivery fails, the marks are kept and `mock_exam_marking_evidence_failed` is logged.
+- **Only the owner.** Marking reads the exam by its ID and the session user. Another student's exam is not found, and the marks are shown only on the owner's exam page. Answer keys are admins only (`requireAdmin`), and only for a group of the course in the URL.
+- **DoS:** `ANSWER_KEY_RATE_LIMIT_PER_MINUTE` key saves per admin per minute (default 60). Students cannot trigger marking more often than they submit (US-45's limit), and a marked exam is never marked again.
+- **Logs and responsiveness:** `operation_timed` lines `mock_exam_marking` and `answer_key_save`, and the events in the events table. Answers, key points and explanations are never logged.
+- **Tests:** `tests/unit/mock-marking-rules.test.ts`, `tests/unit/mock-marking.test.ts`, `tests/unit/mock-marking-pages.test.tsx`, `tests/integration/mock-marking.test.ts`, `tests/e2e/mock-marking.spec.ts`, the marked exam page in `npm run availability`, and `npm run load -- mock-marking`. Details: `MOCK_MARKING_REPORT.md`.
+- **Shared files changed:** `prisma/schema.prisma` (the model, the enum, the columns, back-relations on `QuestionGroup`, `Course`, `User`), the migration, `lib/mock-exams.ts` (the marking fields in `getMockExam`'s select), `app/courses/[courseId]/mock-exams/actions.ts` (marks after a submit), the exam page (lazy marking and one line saying whether it was marked), `components/mock-exam-sitting.tsx` and its CSS (the marking under each answer), `tests/unit/mock-exam-pages.test.tsx` (one mock line), `app/admin/questions/page.tsx` (the "Answer keys" link), `lib/logger.ts` (eight events), `tests/availability/run.ts`, `.env.example`, and `README.md`.
+
 ### Advice from previous students (US-34, US-35, US-37, US-39): open issues
 
 Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advice-rules.ts`), now owned by Mustafa Ergaibi. A review against the stories found no acceptance failure in the code: scopes are checked against the course, only `https://` links are accepted, an anonymous post never carries its author's name or ID to students, and search and filters stay inside the course. These issues are open and **not fixed yet**:
@@ -907,6 +929,11 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Lea Tass (Sprint 4, US-46) | `mock_exam_version_created` | info | `userId`, `courseId`, `mockExamId` (the exam asked from), `originalId`, `newMockExamId`, `version` |
 | Lea Tass (Sprint 4, US-46) | `mock_exam_version_refused` | warn | `userId`, `courseId`, `mockExamId`, `originalId`, `reason` (`not_found`, `not_enough_questions`, `topic_invalid`, `no_questions`, `rate_limited`), `available` |
 | Lea Tass (Sprint 4, US-46) | `mock_exam_version_failed` | error | `userId`, `mockExamId`, `entity` (`list`), `errorType`, `errorCode` |
+
+| Mohammed Al-Haiqi (Sprint 4, US-49) | `mock_exam_marked` | info | `userId`, `mockExamId`, `courseId`, counts per outcome (`correct`, `partial`, `incorrect`, `unanswered`, `noKey`), `eventsRecorded`, `eventsSkipped` |
+| Mohammed Al-Haiqi (Sprint 4, US-49) | `mock_exam_marking_failed`, `mock_exam_marking_evidence_failed` | error | `userId`, `mockExamId`, `errorType`, `errorCode`; the second means the marks were saved but the learning events were not |
+| Mohammed Al-Haiqi (Sprint 4, US-49) | `answer_key_saved`, `answer_key_removed` | info | `adminId`, `courseId`, `groupId`, `keyPoints` (a count); never a key point or an explanation |
+| Mohammed Al-Haiqi (Sprint 4, US-49) | `answer_key_refused`, `answer_key_rate_limited`, `answer_key_save_failed` | warn / error | `adminId`, `courseId`, `groupId`, `reason` (`points_required`, `too_many_points`, `point_too_long`, `explanation_too_long`, `not_found`), `retryAfterSeconds`, or `errorType` |
 
 ### What is never logged
 

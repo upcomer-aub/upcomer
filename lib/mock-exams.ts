@@ -230,9 +230,13 @@ export async function getMockExam(userId: string, mockExamId: string) {
       select: {
         id: true, courseId: true, length: true, requestedLength: true, difficulty: true, topics: true, includeGenerated: true, mixBasis: true, weakTopics: true,
         status: true, createdAt: true, submittedAt: true, timeLimitMinutes: true, startedAt: true, deadlineAt: true, timedOut: true,
+        markedAt: true,
         questions: {
           orderBy: { position: "asc" },
-          select: { id: true, position: true, topic: true, text: true, paperCount: true, totalPapers: true, sourcePapers: true, answer: true },
+          select: {
+            id: true, position: true, topic: true, text: true, paperCount: true, totalPapers: true, sourcePapers: true, answer: true,
+            outcome: true, matchedPoints: true, missedPoints: true, feedback: true,
+          },
         },
       },
     });

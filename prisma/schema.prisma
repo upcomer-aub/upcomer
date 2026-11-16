@@ -80,6 +80,7 @@ model User {
 
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+  answerKeysUpdated   AnswerKey[]          @relation("AnswerKeyUpdatedBy")
 
   @@index([facultyId])
 }
@@ -148,6 +149,7 @@ model Course {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
+  answerKeys       AnswerKey[]
 }
 
 model CourseProfessor {
@@ -343,6 +345,8 @@ model QuestionGroup {
   mockExamQuestions MockExamQuestion[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
+  // The admin's answer key that mock exam answers are marked against (US-49); null when there is none.
+  answerKey     AnswerKey?
 
   @@unique([courseId, normalizedText])
   @@index([courseId, rank])
@@ -745,6 +749,9 @@ model MockExam {
   startedAt   DateTime?
   deadlineAt  DateTime?
   timedOut    Boolean            @default(false)
+
+  // When the answers were marked (US-49); null until then. An exam is marked once.
+  markedAt    DateTime?
   questions   MockExamQuestion[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
@@ -783,9 +790,45 @@ model MockExamQuestion {
   // The student's saved answer; null while empty.
   answer       String?
   answeredAt   DateTime?
+  // The marking (US-49), copied when the exam is marked, so a later change to the answer key never changes it. NO_KEY:
+  // the question has no answer key (or is a generated question), so it was not marked and recorded no learning event.
+  outcome       MarkOutcome?
+  matchedPoints String[]     @default([])
+  missedPoints  String[]     @default([])
+  // Which key points were missed, then the admin's explanation; null when there is nothing to explain.
+  feedback      String?
+  markedAt      DateTime?
 
   @@unique([mockExamId, position])
   @@index([groupId])
   @@index([questionId])
   @@index([generatedQuestionId])
+}
+
+// How a mock exam answer was marked against its answer key (US-49); see lib/mock-marking-rules.ts.
+enum MarkOutcome {
+  CORRECT
+  PARTIAL
+  INCORRECT
+  UNANSWERED
+  NO_KEY
+}
+
+// The answer key of one question-bank group (US-49), written by an admin: the key points a full answer covers, and an
+// explanation shown to students who miss one. Past papers come with no keys, so a question without one is never marked.
+// Added in migration 20261116000004_mock_marking.
+model AnswerKey {
+  id          String        @id @default(cuid())
+  groupId     String        @unique
+  group       QuestionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  courseId    String
+  course      Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  keyPoints   String[]
+  explanation String        @default("")
+  updatedById String?
+  updatedBy   User?         @relation("AnswerKeyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([courseId])
 }

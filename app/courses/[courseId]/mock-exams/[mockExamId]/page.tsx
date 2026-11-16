@@ -9,6 +9,7 @@ import { getCourseById } from "@/lib/courses";
 import { getMockExam } from "@/lib/mock-exams";
 import { DIFFICULTY_LABELS, mixMessage, SAME_QUESTIONS_NOTE, shorterMessage, sittingMessage } from "@/lib/mock-exam-rules";
 import { TIME_UP_NOTICE, timeLimitLabel } from "@/lib/mock-exam-timing";
+import { markMockExam } from "@/lib/mock-marking";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +25,17 @@ export default async function MockExamPage({ params, searchParams }: {
   const { saved, submitted, error, same, version, version_error: versionError, available, length } = await searchParams;
   const user = await requireUser(`/courses/${encodeURIComponent(courseId)}/mock-exams/${encodeURIComponent(mockExamId)}`);
   // US-46: the exam's versions are read with it (only the student's own).
-  const [course, exam, family] = await Promise.all([getCourseById(courseId), getMockExam(user.id, mockExamId), getMockExamVersions(user.id, mockExamId)]);
+  const [course, found, family] = await Promise.all([getCourseById(courseId), getMockExam(user.id, mockExamId), getMockExamVersions(user.id, mockExamId)]);
   const count = (value?: string) => (value && /^\d{1,3}$/.test(value) ? Number(value) : undefined);
   // Another student's exam, or one of another course, looks the same as one that doesn't exist.
-  if (!course || !exam || exam.courseId !== courseId) notFound();
+  if (!course || !found || found.courseId !== courseId) notFound();
+  // US-49: a submitted exam that is not marked yet (submitted before marking existed, or marking failed) is marked now.
+  let exam = found;
+  if (exam.status === "SUBMITTED" && !exam.markedAt) {
+    const marked = await markMockExam(user.id, exam.id);
+    if (marked.ok) exam = (await getMockExam(user.id, mockExamId)) ?? exam;
+  }
+
   const shorter = shorterMessage(exam.requestedLength, exam.length, exam.includeGenerated);
   const mix = mixMessage(exam.mixBasis, exam.weakTopics);
   return <><Link className="back" href={`/courses/${courseId}/mock-exams`}>← Back to Mock Exams</Link><span className="eyebrow">{course.code}</span><h1>Mock Exam</h1>
@@ -41,6 +49,10 @@ export default async function MockExamPage({ params, searchParams }: {
     {error && !(exam.timedOut && error === "time_up") && <p className="notice error" role="alert">{sittingMessage(error)}</p>}
     {version === "new" && family.versions.length > 1 && !error && <p className="notice" role="status">This is version {family.current} of this mock exam: the same topics, length and difficulty, with questions not used in its earlier versions.</p>}
     {versionError && <p className="notice error" role="alert">{versionMessage(versionError, count(available), count(length))}</p>}
+    {/* US-49: whether the answers were marked. */}
+    {exam.status === "SUBMITTED" && <p className="muted" data-marked={exam.markedAt ? "yes" : "no"}>{exam.markedAt
+      ? "Your answers were marked against the answer keys. See each question below."
+      : "Your answers could not be marked yet. Reload the page to try again."}</p>}
     <MockExamSitting exam={exam} />
     <MockExamVersionsSection courseId={courseId} mockExamId={exam.id} family={family} />
   </>;

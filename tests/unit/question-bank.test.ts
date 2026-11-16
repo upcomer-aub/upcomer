@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  findCourse: vi.fn(), findCourses: vi.fn(), findQuestions: vi.fn(), updateQuestions: vi.fn(), findGroups: vi.fn(),
+  findCourse: vi.fn(), findCourses: vi.fn(), findQuestions: vi.fn(), updateQuestions: vi.fn(), updateQuestion: vi.fn(), findGroups: vi.fn(),
   deleteGroups: vi.fn(), existingGroups: vi.fn(), createGroups: vi.fn(), updateGroup: vi.fn(), countFiles: vi.fn(), findFiles: vi.fn(), executeRaw: vi.fn(), transaction: vi.fn(), logError: vi.fn(),
 }));
 const tx = {
   $executeRaw: mocks.executeRaw,
-  question: { findMany: mocks.findQuestions, updateMany: mocks.updateQuestions },
+  question: { findMany: mocks.findQuestions, updateMany: mocks.updateQuestions, update: mocks.updateQuestion },
   questionGroup: { deleteMany: mocks.deleteGroups, findMany: mocks.existingGroups, createManyAndReturn: mocks.createGroups, update: mocks.updateGroup },
 };
 vi.mock("@/lib/db", () => ({ db: {
@@ -48,6 +48,7 @@ describe("rebuildQuestionBank", () => {
       { courseId: "course-a", normalizedText: "define a socket", text: "Define a socket.", paperCount: 2, rank: 1 },
       { courseId: "course-a", normalizedText: "explain arp", text: "Explain ARP.", paperCount: 1, rank: 2 },
     ] }));
+    expect(mocks.updateQuestion).toHaveBeenCalledWith({ where: { id: "q4" }, data: { excludedFromBank: true } });
     // One statement assigns every question its group.
     expect(mocks.executeRaw).toHaveBeenCalledTimes(2);
     expect(mocks.executeRaw.mock.calls[1].slice(1)).toEqual([["q1", "q2", "q3"], ["group-define a socket", "group-define a socket", "group-explain arp"]]);
@@ -174,7 +175,7 @@ describe("getQuestionBank", () => {
     mocks.countFiles.mockResolvedValue(3);
     mocks.findGroups.mockResolvedValue(groups);
     const bank = await getQuestionBank("course-a");
-    expect(mocks.countFiles).toHaveBeenCalledWith({ where: { courseId: "course-a", category: "EXAM", status: "PUBLISHED", questions: { some: { excludedFromBank: false, groupId: { not: null } } } } });
+    expect(mocks.countFiles).toHaveBeenCalledWith({ where: { courseId: "course-a", category: "EXAM", status: "PUBLISHED", questions: { some: { excludedFromBank: false } } } });
     expect(mocks.findGroups).toHaveBeenCalledWith(expect.objectContaining({ where: { courseId: "course-a", questions: { some: { file: { status: "PUBLISHED" } } } }, orderBy: { rank: "asc" } }));
     expect(bank.totalPapers).toBe(3);
     expect(bank.groups.map(group => group.id)).toEqual(["g-socket", "g-arp", "g-port"]);
@@ -239,7 +240,7 @@ describe("getQuestionBankFilterOptions", () => {
       terms: [{ id: "term-fall", name: "Fall" }, { id: "term-spring", name: "Spring" }],
       professors: [{ id: "prof-a", name: "Professor A" }, { id: "prof-b", name: "Professor B" }],
     });
-    expect(mocks.findFiles).toHaveBeenCalledWith(expect.objectContaining({ where: { courseId: "course-a", category: "EXAM", status: "PUBLISHED", questions: { some: { excludedFromBank: false, groupId: { not: null } } } } }));
+    expect(mocks.findFiles).toHaveBeenCalledWith(expect.objectContaining({ where: { courseId: "course-a", category: "EXAM", status: "PUBLISHED", questions: { some: { excludedFromBank: false } } } }));
   });
   it("logs and rethrows a failure", async () => {
     mocks.findFiles.mockRejectedValue(failure("PrismaClientInitializationError"));

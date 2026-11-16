@@ -42,6 +42,15 @@ afterAll(async () => {
 });
 
 describe("legacy question cleanup and persistent exclusion", () => {
+  it("counts usable pending questions before their first grouping", async () => {
+    const bank = await getQuestionBank(courseId);
+    expect(bank.totalPapers).toBe(2);
+    expect(bank.groups).toEqual([]);
+    const exam = await getConsolidatedExam(courseId);
+    expect(exam.totalPapers).toBe(2);
+    expect(exam.questions).toEqual([]);
+  });
+
   it("cleans legacy text and ranks real questions, retaining excluded source records for review", async () => {
     expect(await rebuildQuestionBank(courseId)).toMatchObject({ ok: true, groupCount: 1, questionCount: 3 });
     expect((await getQuestionBank(courseId)).totalPapers).toBe(1);
@@ -49,7 +58,7 @@ describe("legacy question cleanup and persistent exclusion", () => {
     expect((await getQuestionBank(courseId)).groups.map(group => group.text)).toEqual(["Explain TCP flow control."]);
     expect((await getConsolidatedExam(courseId)).questions.map(question => question.text)).toEqual(["Explain TCP flow control."]);
     expect(await db.question.findUniqueOrThrow({ where: { id: questionId } })).toMatchObject({ text: "2. Explain TCP flow control." });
-    expect(await db.question.findUniqueOrThrow({ where: { id: ruleId } })).toMatchObject({ groupId: null, text: "1. This is an open book exam" });
+    expect(await db.question.findUniqueOrThrow({ where: { id: ruleId } })).toMatchObject({ groupId: null, excludedFromBank: true, text: "1. This is an open book exam" });
     expect((await getCorrectionPage(courseId))?.ungrouped.some(question => question.id === ruleId)).toBe(true);
   });
 

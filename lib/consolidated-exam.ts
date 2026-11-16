@@ -64,7 +64,7 @@ export async function getConsolidatedExam(courseId: string): Promise<Consolidate
   const [bank, coursePapers] = await Promise.all([
     getQuestionBank(courseId),
     // Only published papers count (US-13): a pending or rejected submission never changes X or Y.
-    db.courseFile.findMany({ where: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES, questions: { some: { excludedFromBank: false, groupId: { not: null } } } }, select: { id: true } }).catch(error => {
+    db.courseFile.findMany({ where: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES, questions: { some: { excludedFromBank: false } } }, select: { id: true } }).catch(error => {
       logError("question_bank_retrieval_failed", { courseId, source: "consolidated_exam", errorType: errorType(error) });
       throw error;
     }),

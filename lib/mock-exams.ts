@@ -1,13 +1,14 @@
-import { MockExamDifficulty, MockExamStatus } from "@prisma/client";
+import { MockExamDifficulty, MockExamMix, MockExamStatus } from "@prisma/client";
 import { getConsolidatedExam } from "@/lib/consolidated-exam";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
-import { questionTopic } from "@/lib/learning-profile";
+import { getLearningProfile, questionTopic, type LearningProfile } from "@/lib/learning-profile";
 import { errorCode, logError } from "@/lib/logger";
 import {
-  cleanAnswer, MOCK_ANSWER_MAX_LENGTH, parseMockExamConfig, selectMockQuestions, sourceQuestionOf,
+  cleanAnswer, MOCK_ANSWER_MAX_LENGTH, parseMockExamConfig, sourceQuestionOf,
   type GeneratedCandidate, type MockExamError, type MockExamOptions, type PoolQuestion, type SittingError,
 } from "@/lib/mock-exam-rules";
+import { selectMockQuestions } from "@/lib/mock-exam-mix";
 import { getGeneratedPracticeQuestions } from "@/lib/practice-generation";
 import { courseExams } from "@/lib/question-bank";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
@@ -17,6 +18,8 @@ import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
 // then sat: answers are saved and the exam is submitted. Marking and results are US-49 and US-50.
 // When the student asks for it, up to half of the exam is their own generated practice questions (US-44). Those are read
 // only through getGeneratedPracticeQuestions (Ali Slim's contract), never from the table, and nothing is generated here.
+// The topic mix is weighted by the student's learning profile in this course and by exam frequency (US-47, the rules are
+// in lib/mock-exam-mix.ts). Topics marked as covered (US-32) are not read.
 // Nothing here checks the caller: the pages and actions call requireUser() first and pass the session user's ID, and every
 // read and write of an exam is limited to its own student. Question text and answers are never logged.
 
@@ -45,9 +48,28 @@ export async function buildPool(courseId: string): Promise<PoolQuestion[]> {
 
 // The student's generated practice questions an exam can include, newest first: only their own, and only those that still
 // match a published source (getGeneratedPracticeQuestions checks both).
-async function generatedCandidates(userId: string, courseId: string): Promise<GeneratedCandidate[]> {
+type SourcedCandidate = GeneratedCandidate & { sourceQuestionId: string };
+const withoutSource = ({ sourceQuestionId, ...item }: SourcedCandidate): GeneratedCandidate => (void sourceQuestionId, item);
+async function generatedCandidates(userId: string, courseId: string): Promise<SourcedCandidate[]> {
   const items = await getGeneratedPracticeQuestions(userId, courseId);
-  return items.map(item => ({ id: item.id, topicKey: item.topicKey, topic: item.topic, difficulty: item.difficulty, text: item.prompt, sourcePaper: item.sourceQuestion.file.title }));
+  return items.map(item => ({
+    id: item.id, topicKey: item.topicKey, topic: item.topic, difficulty: item.difficulty, text: item.prompt, sourcePaper: item.sourceQuestion.file.title,
+    sourceQuestionId: item.sourceQuestionId,
+  }));
+}
+
+// Each generated question's source question's group in the pool, by its paper count (US-47 ranks generated questions by
+// it, since they appeared in no paper). A source outside the pool is left unknown, which the rules count as one paper.
+async function withSourcePaperCounts(items: SourcedCandidate[], pool: PoolQuestion[]): Promise<GeneratedCandidate[]> {
+  const ids = [...new Set(items.map(item => item.sourceQuestionId))];
+  const sources = ids.length ? await db.question.findMany({ where: { id: { in: ids } }, select: { id: true, groupId: true } }) : [];
+  const groups = new Map(sources.map(source => [source.id, source.groupId]));
+  const counts = new Map(pool.map(question => [question.id, question.paperCount]));
+  return items.map(item => {
+    const group = groups.get(item.sourceQuestionId);
+    const count = group ? counts.get(group) : undefined;
+    return count === undefined ? withoutSource(item) : { ...withoutSource(item), sourcePaperCount: count };
+  });
 }
 
 // The topics a student can build an exam from, with how many questions each has, for the form. With a student, also how
@@ -72,13 +94,16 @@ export async function getMockExamOptions(courseId: string, userId?: string): Pro
 export type CreateMockExamInput = { courseId: string; length: string; difficulty: string; topics: string[]; includeGenerated?: boolean };
 // `difficultyApplied` is false when an EASY, MEDIUM or HARD exam needed every matching past-paper question, so the
 // difficulty could not choose between them.
-export type CreateMockExamResult = { ok: true; id: string; difficultyApplied: boolean } | { ok: false; error: MockExamError; available?: number };
+export type CreateMockExamResult = { ok: true; id: string; difficultyApplied: boolean; length: number } | { ok: false; error: MockExamError; available?: number };
 
 const paperLabel = (paper: { title: string; year: number | null }) => (paper.year ? `${paper.title} (${paper.year})` : paper.title);
 
-// Generates a mock exam for the given student. The exam has exactly the length asked for, only questions of the chosen
-// topics, and the chosen difficulty; if the course cannot give that, nothing is saved and the error says how many questions match.
-// The per-hour limit counts exams that are made: a refused attempt (too few questions, an unknown topic) does not use it up.
+// Generates a mock exam for the given student, with only questions of the chosen topics and the chosen difficulty. It has
+// the length asked for, or the largest length those allow (US-45): the exam keeps both, and its page says it is shorter.
+// It is refused only when nothing matches.
+// The topic mix follows the student's profile in this course and exam frequency (US-47). If the profile cannot be read,
+// the exam is still made, by exam frequency only, and says so; the failure is logged.
+// The per-hour limit counts exams that are made: a refused attempt (an unknown topic, nothing matching) does not use it up.
 export async function createMockExam(userId: string, input: CreateMockExamInput): Promise<CreateMockExamResult> {
   const context = { userId, courseId: input.courseId.slice(0, 100) || undefined };
   const refuse = (error: MockExamError, available?: number): CreateMockExamResult => {
@@ -93,9 +118,24 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
     if (!course) return refuse("course_not_found");
     const pool = await buildPool(course.id);
     if (!pool.length) return refuse("no_questions");
-    const generated = config.includeGenerated ? await generatedCandidates(userId, course.id) : [];
-    const selected = selectMockQuestions(pool, config, { generated });
+    const weighting = (step: string, error: unknown) => logError("mock_exam_weighting_failed", { ...context, step, errorType: errorType(error) });
+    let generated: GeneratedCandidate[] = [];
+    if (config.includeGenerated) {
+      const items = await generatedCandidates(userId, course.id);
+      generated = await withSourcePaperCounts(items, pool).catch(error => {
+        weighting("generated_sources", error);
+        return items.map(withoutSource);
+      });
+    }
+    let profile: LearningProfile | null = null;
+    try {
+      profile = await getLearningProfile(userId, course.id);
+    } catch (error) {
+      weighting("profile", error);
+    }
+    const selected = selectMockQuestions(pool, config, { generated, profile: profile ?? undefined });
     if (!selected.ok) return refuse(selected.error, selected.available);
+    const mixBasis = !profile ? MockExamMix.PROFILE_UNAVAILABLE : selected.hasProfile ? MockExamMix.PROFILE : MockExamMix.NO_PROFILE;
     const limit = checkRateLimit(`mock-exam:${userId}`, mockExamLimit(), MOCK_EXAM_RATE_WINDOW_MS);
     if (!limit.ok) {
       logError("mock_exam_rate_limited", { ...context, retryAfterSeconds: String(limit.retryAfterSeconds) });
@@ -110,7 +150,8 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
     const created = await db.mockExam.create({
       data: {
         userId, courseId: course.id, topicKeys: config.topicKeys, topics: config.topicKeys.map(key => labels.get(key) ?? key),
-        length: config.length, difficulty: MockExamDifficulty[config.difficulty], includeGenerated: config.includeGenerated === true,
+        length: selected.length, requestedLength: selected.requested, difficulty: MockExamDifficulty[config.difficulty], includeGenerated: config.includeGenerated === true,
+        mixBasis, weakTopics: mixBasis === MockExamMix.PROFILE ? selected.weakTopics : [],
         questions: {
           create: [
             ...selected.questions.map((question, index) => ({
@@ -128,11 +169,14 @@ export async function createMockExam(userId: string, input: CreateMockExamInput)
       },
       select: { id: true },
     });
+    if (selected.invalidTopics) {
+      logError("mock_exam_weighting_invalid_inputs", { ...context, mockExamId: created.id, affectedTopics: String(selected.invalidTopics), reasons: selected.reasons.join(",") });
+    }
     logError("mock_exam_created", {
-      ...context, mockExamId: created.id, difficulty: config.difficulty, length: String(config.length), topicCount: String(config.topicKeys.length),
-      generatedCount: String(selected.generated.length),
+      ...context, mockExamId: created.id, difficulty: config.difficulty, length: String(selected.length), requestedLength: String(selected.requested),
+      topicCount: String(config.topicKeys.length), generatedCount: String(selected.generated.length), mixBasis, weakTopicCount: String(selected.weakTopics.length),
     });
-    return { ok: true, id: created.id, difficultyApplied: selected.narrowed || config.difficulty === "MIXED" };
+    return { ok: true, id: created.id, difficultyApplied: selected.narrowed || config.difficulty === "MIXED", length: selected.length };
   } catch (error) {
     logError("mock_exam_failed", { ...context, errorType: errorType(error), errorCode: errorCode(error) });
     return { ok: false, error: "unexpected" };
@@ -146,7 +190,8 @@ export async function getMockExam(userId: string, mockExamId: string) {
     return await db.mockExam.findFirst({
       where: { id: mockExamId, userId },
       select: {
-        id: true, courseId: true, length: true, difficulty: true, topics: true, includeGenerated: true, status: true, createdAt: true, submittedAt: true,
+        id: true, courseId: true, length: true, requestedLength: true, difficulty: true, topics: true, includeGenerated: true, mixBasis: true, weakTopics: true,
+        status: true, createdAt: true, submittedAt: true,
         questions: {
           orderBy: { position: "asc" },
           select: { id: true, position: true, topic: true, text: true, paperCount: true, totalPapers: true, sourcePapers: true, answer: true },

@@ -1,5 +1,5 @@
-// Mock exam rules shared by the server, the actions, and the browser form (US-45), including the pure question selection.
-// No database access here, so the same pool and settings always give the same exam.
+// Mock exam rules shared by the server, the actions, and the browser form (US-45): limits, messages, and the types of the
+// question selection. The selection itself is in lib/mock-exam-mix.ts (server only). No database access here.
 
 export const MOCK_EXAM_MIN_LENGTH = 3;
 export const MOCK_EXAM_MAX_LENGTH = 50;
@@ -26,10 +26,9 @@ export function mockExamMessage(error: string, available?: number) {
     case "topic_invalid": return "One of the topics you picked isn't a topic of this course. Choose again.";
     case "length_invalid": return `Choose between ${MOCK_EXAM_MIN_LENGTH} and ${MOCK_EXAM_MAX_LENGTH} questions.`;
     case "difficulty_invalid": return "Choose a difficulty from the list.";
-    case "not_enough_questions":
-      return available === undefined ? "There are not enough questions for that exam. Choose a shorter exam or more topics."
-        : available < MOCK_EXAM_MIN_LENGTH ? `Only ${available} ${available === 1 ? "question matches" : "questions match"} your topics. Choose more topics.`
-        : `Only ${available} questions match your topics. Choose a shorter exam (${MOCK_EXAM_MIN_LENGTH} to ${available}) or more topics.`;
+    // A request larger than the topics can fill gets the largest exam they allow; this is left for when nothing matches.
+    case "not_enough_questions": return available ? `Only ${available} ${available === 1 ? "question matches" : "questions match"} your topics. Choose more topics.`
+      : "No question matches your topics, so a mock exam can't be made. Choose more topics.";
     case "rate_limited": return "You have generated a lot of mock exams in a short time. Wait a while and try again.";
     default: return "Your mock exam could not be made. Please try again.";
   }
@@ -37,6 +36,29 @@ export function mockExamMessage(error: string, available?: number) {
 
 // Shown on a new exam when the difficulty could not choose between the questions.
 export const SAME_QUESTIONS_NOTE = "Your topics have just enough past-paper questions for this exam, so the difficulty could not choose between them. Any difficulty gives these questions.";
+
+// On the exam page when the exam is shorter than asked (US-45): what was asked, what the topics allow, and why.
+export function shorterMessage(requested: number | null | undefined, length: number, includeGenerated: boolean): string | null {
+  if (typeof requested !== "number" || requested <= length) return null;
+  const fit = includeGenerated ? " (past papers and your generated practice questions of this difficulty)" : "";
+  return `You asked for ${requested} questions, but your topics have only ${length} that ${length === 1 ? "fits" : "fit"}${fit}, so this exam has ${length}.`;
+}
+
+// What an exam's topic mix was weighted by (US-47); the same names as the MockExamMix enum.
+export type MixBasis = "PROFILE" | "NO_PROFILE" | "PROFILE_UNAVAILABLE";
+const FREQUENCY = "how often each topic comes up in past papers";
+// On the exam page: why the exam has this mix of topics. It states the inputs only and never claims mastery. Null for an
+// exam made before the mix was weighted.
+export function mixMessage(basis: string | null, weakTopics: string[]): string | null {
+  switch (basis) {
+    case "PROFILE": return weakTopics.length
+      ? `Weighted toward your weaker ${weakTopics.length === 1 ? "topic" : "topics"}: ${weakTopics.join(", ")}, and toward the topics that come up most in past papers.`
+      : `Weighted by your ratings and practice results and by ${FREQUENCY}.`;
+    case "NO_PROFILE": return `You have no ratings or practice results in this course yet, so the mix follows ${FREQUENCY}.`;
+    case "PROFILE_UNAVAILABLE": return `Your ratings could not be read, so the mix follows ${FREQUENCY}.`;
+    default: return null;
+  }
+}
 
 export function sittingMessage(error: string) {
   switch (error) {
@@ -79,12 +101,16 @@ export type GeneratedCandidate = {
   text: string;
   // The title of the past paper the task is based on.
   sourcePaper: string;
+  // How many past papers the question the task is based on appeared in (its question-bank group's paper count). A
+  // generated question appeared in no paper itself, so US-47 ranks it by this. 1 when unknown.
+  sourcePaperCount?: number;
 };
 
 // `includeGenerated` is off unless the student ticks it, so an exam is past-paper questions only by default.
 export type MockConfig = { topicKeys: string[]; length: number; difficulty: MockExamDifficultyName; includeGenerated?: boolean };
 
-// At most this share of an exam comes from generated questions: half, rounded down.
+// At most this share of a topic's questions in an exam are generated ones: half, rounded down. So an exam as a whole is
+// never more than half generated.
 export const generatedShare = (length: number) => Math.floor(length / 2);
 
 const normalizeTopicKey = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -119,54 +145,4 @@ export function sourceQuestionOf(papers: Array<{ id: string }>, questions: Array
 export function complexityOf(text: string) {
   const parts = text.split("\n").filter(line => line.trim()).length || 1;
   return text.length + 80 * (parts - 1);
-}
-
-export type Selection =
-  // `questions` are the past-paper picks in the Upcomer Exam's order; `generated` follow them in the exam. `narrowed` is
-  // false when every matching past-paper question was needed, so the difficulty could not choose between them.
-  | { ok: true; questions: PoolQuestion[]; generated: GeneratedCandidate[]; narrowed: boolean }
-  | { ok: false; error: "topic_invalid" | "not_enough_questions"; available: number };
-
-export type SelectOptions = {
-  // The student's generated practice questions, newest first (US-44). Used only when the settings ask for them.
-  generated?: GeneratedCandidate[];
-  // IDs (question-bank groups or generated items) to leave out, for an alternative version of an exam (US-46).
-  exclude?: ReadonlySet<string>;
-  // Reserved for US-47 (weighting by weakness and importance, by topic key). Not read yet.
-  weights?: ReadonlyMap<string, number>;
-};
-
-// Picks exactly `length` questions of the chosen topics (every topic when none is chosen), by difficulty:
-// the questions are sorted by complexity (ties: more frequent first, then the Upcomer Exam's order, then ID), and
-// EASY takes the first, HARD the last, MEDIUM the middle, and MIXED questions spread evenly over the whole range. The
-// picks come back in the Upcomer Exam's order, so the exam reads like it. Pure: the same pool and settings always give
-// the same questions, whatever order the pool is in.
-//
-// Generated questions (US-44) are included only when the settings say so. Then up to half of the exam (generatedShare)
-// comes from `options.generated`: those of the chosen topics, generated at the chosen difficulty (any, for MIXED), in the
-// order given. The rest are past-paper questions picked by the rule above. With fewer generated questions than the share,
-// past papers fill the rest, so the exam always has exactly `length` questions.
-export function selectMockQuestions(pool: PoolQuestion[], { topicKeys, length: total, difficulty, includeGenerated }: MockConfig, options: SelectOptions = {}): Selection {
-  const known = new Set(pool.flatMap(question => (question.topicKey ? [question.topicKey] : [])));
-  if (topicKeys.some(key => !known.has(key))) return { ok: false, error: "topic_invalid", available: 0 };
-  const chosen = new Set(topicKeys);
-  const left = (id: string) => !options.exclude?.has(id);
-  const eligible = (chosen.size ? pool.filter(question => question.topicKey !== null && chosen.has(question.topicKey)) : pool).filter(question => left(question.id));
-  const candidates = !includeGenerated ? [] : (options.generated ?? []).filter(item =>
-    left(item.id) && (!chosen.size || chosen.has(item.topicKey)) && (difficulty === "MIXED" || item.difficulty === difficulty));
-  const generated = candidates.slice(0, generatedShare(total));
-  const length = total - generated.length;
-  // The longest exam these questions can make: every past-paper question, and as many generated ones again at most.
-  if (eligible.length < length) return { ok: false, error: "not_enough_questions", available: eligible.length + Math.min(candidates.length, eligible.length) };
-  const ranked = eligible.map(question => ({ question, complexity: complexityOf(question.text) })).sort((a, b) =>
-    a.complexity - b.complexity || b.question.paperCount - a.question.paperCount || a.question.position - b.question.position
-    || (a.question.id < b.question.id ? -1 : a.question.id > b.question.id ? 1 : 0));
-  const count = ranked.length;
-  const window = (start: number) => Array.from({ length }, (_, index) => start + index);
-  const indexes = difficulty === "EASY" ? window(0)
-    : difficulty === "HARD" ? window(count - length)
-    : difficulty === "MEDIUM" ? window(Math.floor((count - length) / 2))
-    : length === 1 ? [Math.floor((count - 1) / 2)]
-    : Array.from({ length }, (_, index) => Math.round((index * (count - 1)) / (length - 1)));
-  return { ok: true, questions: indexes.map(index => ranked[index].question).sort((a, b) => a.position - b.position), generated, narrowed: count > length };
 }

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   db: {
     course: { findUnique: vi.fn() }, courseFile: { findMany: vi.fn() }, question: { findMany: vi.fn() },
-    mockExam: { create: vi.fn() }, generatedPracticeQuestion: { findMany: vi.fn() },
+    mockExam: { create: vi.fn() }, generatedPracticeQuestion: { findMany: vi.fn() }, learningTopic: { findMany: vi.fn() },
   },
   getConsolidatedExam: vi.fn(), getGeneratedPracticeQuestions: vi.fn(), logError: vi.fn(),
 }));
@@ -16,13 +16,12 @@ vi.mock("@/lib/practice-generation", () => ({ getGeneratedPracticeQuestions: moc
 vi.mock("@/lib/logger", () => ({ logError: mocks.logError, errorCode: () => undefined }));
 vi.mock("@/lib/rate-limit", () => ({ checkRateLimit: vi.fn(() => ({ ok: true })), limitFromEnv: (_name: string, fallback: number) => fallback }));
 
-import {
-  generatedShare, selectMockQuestions, sourceQuestionOf, type GeneratedCandidate, type MockConfig, type PoolQuestion,
-} from "@/lib/mock-exam-rules";
+import { selectMockQuestions } from "@/lib/mock-exam-mix";
+import { generatedShare, sourceQuestionOf, type GeneratedCandidate, type MockConfig, type PoolQuestion } from "@/lib/mock-exam-rules";
 import { createMockExam, getMockExamOptions } from "@/lib/mock-exams";
 
 const question = (index: number): PoolQuestion => ({
-  id: `g${index}`, position: index, text: "x".repeat(index * 10), paperCount: 1, totalPapers: 2,
+  id: `g${index}`, position: index, text: "x".repeat(index * 10), paperCount: 1, totalPapers: 8,
   topicKey: index <= 4 ? "networking" : "databases", topic: index <= 4 ? "Networking" : "Databases", papers: [{ id: `p${index}`, title: `Paper ${index}`, year: 2025 }],
 });
 // Eight past-paper questions, from the simplest (g1) to the most complex (g8); g1-g4 are Networking, g5-g8 Databases.
@@ -38,7 +37,7 @@ const config = (over: Partial<MockConfig> = {}): MockConfig => ({ topicKeys: [],
 const pick = (settings: MockConfig, options: Parameters<typeof selectMockQuestions>[2] = { generated }) => {
   const result = selectMockQuestions(pool, settings, options);
   if (!result.ok) throw new Error(result.error);
-  return { past: result.questions.map(item => item.id), generated: result.generated.map(item => item.id), narrowed: result.narrowed };
+  return { past: result.questions.map(item => item.id), generated: result.generated.map(item => item.id), narrowed: result.narrowed, counts: result.topicCounts };
 };
 
 describe("selectMockQuestions with generated practice questions", () => {
@@ -49,17 +48,24 @@ describe("selectMockQuestions with generated practice questions", () => {
     expect(without).toMatchObject({ ok: true, generated: [] });
   });
 
-  it("gives them at most half of the exam, rounded down, and always the exact length", () => {
+  it("gives them at most half of each topic's questions, rounded down, so never more than half of the exam, and the exact length", () => {
     expect([3, 4, 5, 6, 7].map(generatedShare)).toEqual([1, 2, 2, 3, 3]);
+    // Networking and Databases weigh the same, so they share the slots; each topic gives half of its own to generated ones.
+    expect([3, 4, 5, 6, 7].map(length => pick(config({ length })).generated.length)).toEqual([1, 2, 2, 2, 3]);
     for (const length of [3, 4, 5, 6, 7]) {
       const exam = pick(config({ length }));
-      expect(exam.generated).toHaveLength(generatedShare(length));
+      expect(exam.generated.length).toBeLessThanOrEqual(generatedShare(length));
       expect(exam.past.length + exam.generated.length).toBe(length);
+      for (const key of ["networking", "databases"]) {
+        const fromTopic = exam.generated.filter(id => generated.find(item => item.id === id)?.topicKey === key).length;
+        expect(fromTopic).toBeLessThanOrEqual(generatedShare(exam.counts[key] ?? 0));
+      }
     }
   });
 
-  it("takes them in the order given, newest first", () => {
-    expect(pick(config({ length: 6 })).generated).toEqual(["n-easy", "d-hard", "n-hard"]);
+  it("takes them in the order given inside a topic, newest first, and keeps that order in the exam", () => {
+    expect(pick(config({ length: 6 })).generated).toEqual(["n-easy", "d-hard"]);
+    expect(pick(config({ length: 8 })).generated).toEqual(["n-easy", "d-hard", "n-hard", "d-easy"]);
   });
 
   it("uses only those of the chosen topics", () => {
@@ -69,7 +75,8 @@ describe("selectMockQuestions with generated practice questions", () => {
   });
 
   it("uses only those generated at the chosen difficulty, and any for MIXED", () => {
-    expect(pick(config({ difficulty: "EASY", length: 6 })).generated).toEqual(["n-easy", "d-easy", "n-easy-2"]);
+    expect(pick(config({ difficulty: "EASY", length: 6 })).generated).toEqual(["n-easy", "d-easy"]);
+    expect(pick(config({ difficulty: "EASY", topicKeys: ["networking"], length: 6 })).generated).toEqual(["n-easy", "n-easy-2"]);
     expect(pick(config({ difficulty: "MEDIUM", length: 6 })).generated).toEqual(["n-medium"]);
     expect(pick(config({ difficulty: "HARD", topicKeys: ["databases"], length: 4 })).generated).toEqual(["d-hard"]);
   });
@@ -83,22 +90,24 @@ describe("selectMockQuestions with generated practice questions", () => {
   });
 
   it("picks the past-paper part by the usual difficulty rule", () => {
-    // Four of the seven are past-paper questions: the four simplest for EASY.
-    expect(pick(config({ difficulty: "EASY", length: 7 })).past).toEqual(["g1", "g2", "g3", "g4"]);
+    // Databases gets 4 slots (1 generated), Networking 3 (1 generated): the simplest of each topic for EASY.
+    expect(pick(config({ difficulty: "EASY", length: 7 })).past).toEqual(["g1", "g2", "g5", "g6", "g7"]);
     expect(pick(config({ difficulty: "HARD", topicKeys: ["databases"], length: 4 })).past).toEqual(["g6", "g7", "g8"]);
   });
 
-  it("makes exams the past papers alone could not, and says how long an exam can be", () => {
+  it("makes longer exams than the past papers alone, and the largest valid one when even that is too short", () => {
     // Databases has four past-paper questions and two generated ones.
     expect(selectMockQuestions(pool, config({ topicKeys: ["databases"], length: 6, includeGenerated: false }), { generated }))
-      .toEqual({ ok: false, error: "not_enough_questions", available: 4 });
+      .toMatchObject({ ok: true, requested: 6, length: 4 });
     expect(pick(config({ topicKeys: ["databases"], length: 6 }))).toMatchObject({ past: ["g5", "g6", "g7", "g8"], generated: ["d-hard", "d-easy"], narrowed: false });
-    expect(selectMockQuestions(pool, config({ topicKeys: ["databases"], length: 7 }), { generated })).toEqual({ ok: false, error: "not_enough_questions", available: 6 });
+    expect(selectMockQuestions(pool, config({ topicKeys: ["databases"], length: 7 }), { generated })).toMatchObject({ ok: true, requested: 7, length: 6 });
   });
 
-  it("never offers more generated questions than past-paper ones as available", () => {
+  it("never uses more generated questions than past-paper ones in a topic", () => {
     const one = [question(1)];
-    expect(selectMockQuestions(one, config({ length: 5 }), { generated })).toEqual({ ok: false, error: "not_enough_questions", available: 2 });
+    const result = selectMockQuestions(one, config({ length: 5 }), { generated });
+    expect(result).toMatchObject({ ok: true, requested: 5, length: 2 });
+    expect(result.ok && [result.questions.length, result.generated.length]).toEqual([1, 1]);
   });
 
   it("still refuses a topic the course's papers do not have", () => {
@@ -160,6 +169,7 @@ describe("createMockExam with generated practice questions", () => {
     ]));
     mocks.getGeneratedPracticeQuestions.mockResolvedValue([stored("gen-1", "EASY"), stored("gen-2", "HARD"), stored("gen-3", "EASY")]);
     mocks.db.mockExam.create.mockResolvedValue({ id: "mock-1" });
+    mocks.db.learningTopic.findMany.mockResolvedValue([]);
   });
 
   it("does not read generated questions unless the student asks, and stores a past-paper exam as before", async () => {

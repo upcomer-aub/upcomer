@@ -131,7 +131,12 @@ type LogEvent =
   | "advice_comment_retrieval_failed"
   | "mock_exam_version_created"
   | "mock_exam_version_refused"
-  | "mock_exam_version_failed";
+  | "mock_exam_version_failed"
+  | "walkthrough_generated"
+  | "walkthrough_refused"
+  | "walkthrough_rate_limited"
+  | "walkthrough_failed"
+  | "walkthrough_retrieval_failed";
 
 
 export type { LogEvent };
@@ -306,6 +311,13 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   mock_exam_version_created: "info",
   mock_exam_version_refused: "warn",
   mock_exam_version_failed: "error",
+  // Lea Tass (Sprint 4): step-by-step walkthroughs of past-exam questions (US-51). IDs, reason codes, error types, the AI's
+  // HTTP status, step counts and the duration only; question, prompt and answer text are never logged.
+  walkthrough_generated: "info",
+  walkthrough_refused: "warn",
+  walkthrough_rate_limited: "warn",
+  walkthrough_failed: "error",
+  walkthrough_retrieval_failed: "error",
 
 };
 

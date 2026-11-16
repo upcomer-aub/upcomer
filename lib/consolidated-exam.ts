@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { isLowConfidence, tierFor, type LikelihoodTier } from "@/lib/likelihood-tiers";
 import { logError } from "@/lib/logger";
+import { sourceQuestionOf } from "@/lib/mock-exam-rules";
 import { getQuestionBank, type QuestionBankGroup } from "@/lib/question-bank";
 import { cleanQuestionText } from "@/lib/question-grouping";
 
@@ -25,6 +26,9 @@ export type ExamQuestion = {
   // Each paper once, newest first.
   papers: ExamPaper[];
   tier: LikelihoodTier;
+  // US-51: the stored source question its "Step-by-step walkthrough" link opens (see walkthroughSourceOf); null or
+  // missing means no link.
+  sourceQuestionId?: string | null;
 };
 // A run of consecutive questions in one tier. Tiers follow the ranking, so the exam reads top to bottom in rank order.
 export type ExamSection = { tier: LikelihoodTier; questions: ExamQuestion[] };
@@ -44,6 +48,16 @@ export function fullQuestionText(text: string) {
 function groupText(group: QuestionBankGroup) {
   const source = group.questions.find(question => cleanQuestionText(question.text) === group.text) ?? group.questions[0];
   return (source && fullQuestionText(source.text)) || group.text;
+}
+
+// US-51: the group's source question a walkthrough is made of. The one whose text the card shows (as groupText picks it),
+// when its paper is one of the course's published papers counted here, so the walkthrough page shows the question the
+// student just read; otherwise the group's source question as mock exams choose it (sourceQuestionOf, US-45). Null when the
+// group has no question on a counted paper.
+export function walkthroughSourceOf(group: Pick<QuestionBankGroup, "text" | "questions">, papers: Array<{ id: string }>): string | null {
+  const shown = group.questions.find(question => cleanQuestionText(question.text) === group.text);
+  if (shown && papers.some(paper => paper.id === shown.fileId)) return shown.id;
+  return sourceQuestionOf(papers, group.questions);
 }
 
 function sectionsOf(questions: ExamQuestion[]) {
@@ -78,6 +92,7 @@ export async function getConsolidatedExam(courseId: string): Promise<Consolidate
     .map(({ group, papers }, index): ExamQuestion => ({
       id: group.id, position: index + 1, rank: group.rank, text: groupText(group),
       paperCount: papers.length, totalPapers, papers, tier: tierFor(papers.length, totalPapers),
+      sourceQuestionId: walkthroughSourceOf(group, papers),
     }));
   return { totalPapers, lowConfidence: isLowConfidence(totalPapers), questions, sections: sectionsOf(questions) };
 }

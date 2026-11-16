@@ -4,9 +4,10 @@ import styles from "./source-label.module.css";
 // US-42: tells students where what they are reading comes from. "Student opinion" is advice from previous students
 // (US-34 and later); "Historical exam data" is what was counted from published past exam papers (question bank, Upcomer
 // Exam). The two never mix: advice is not read by any ranking or count. The difference is in the words and the tag's
-// outline (solid or dashed), never in color alone.
+// outline (solid or dashed), never in color alone. US-51 adds "AI-generated" (a dotted outline) for walkthroughs written by
+// an AI model from a past-exam question.
 
-export type SourceKind = "opinion" | "statistics";
+export type SourceKind = "opinion" | "statistics" | "ai";
 
 export const SOURCE_LABELS: Record<SourceKind, { tag: string; note: string }> = {
   opinion: {
@@ -16,6 +17,10 @@ export const SOURCE_LABELS: Record<SourceKind, { tag: string; note: string }> = 
   statistics: {
     tag: "Historical exam data",
     note: "Counted from published past exam papers only; student advice never changes these rankings or counts.",
+  },
+  ai: {
+    tag: "AI-generated",
+    note: "Written by an AI model from the question alone. It may contain mistakes and is not an official answer; check it against your course material.",
   },
 };
 

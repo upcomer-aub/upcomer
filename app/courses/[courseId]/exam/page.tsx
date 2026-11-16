@@ -62,8 +62,8 @@ export default async function ConsolidatedExamPage({ params, searchParams }: {
           {!user && <p className="muted">Logged-in students can mark questions done, continue where they stopped, and see a personal order.</p>}
           {!user && <p className="muted"><Link href={`/login?next=${encodeURIComponent(route)}`}>Log in</Link> to report a question that is wrong or grouped wrongly.</p>}
           {personalOrder?.hasProfile
-            ? <PersonalExamView questions={shown} report={user ? { courseId } : null} progress={done && { courseId, done, personal }} />
-            : <ConsolidatedExamView sections={exam.sections} report={user ? { courseId } : null} progress={done && { courseId, done, personal }} />}
+            ? <PersonalExamView questions={shown} report={user ? { courseId } : null} progress={done && { courseId, done, personal }} walkthrough={{ courseId }} />
+            : <ConsolidatedExamView sections={exam.sections} report={user ? { courseId } : null} progress={done && { courseId, done, personal }} walkthrough={{ courseId }} />}
         </>}
   </>;
 }

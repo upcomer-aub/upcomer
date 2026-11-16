@@ -13,3 +13,6 @@
 .sources summary { width: fit-content; color: var(--link); font-weight: 600; cursor: pointer; }
 .sources ul { margin: .5rem 0 0; padding-left: 1.25rem; }
 .sources li { margin: .2rem 0; }
+/* US-51: the link to the question's step-by-step walkthrough. */
+.walkthrough { margin: .5rem 0 0; font-size: .95rem; }
+.walkthrough a { font-weight: 600; }

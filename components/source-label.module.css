@@ -7,3 +7,5 @@
 }
 .opinion { border: 1px dashed var(--input-border); background: var(--surface); }
 .statistics { border: 1px solid var(--primary); background: var(--tint); }
+/* US-51: walkthroughs written by an AI model. A dotted outline, so it differs from both kinds above without color. */
+.ai { border: 2px dotted var(--input-border); background: var(--surface); }

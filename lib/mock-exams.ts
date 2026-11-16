@@ -259,7 +259,7 @@ export async function listMyMockExams(userId: string, courseId: string) {
       where: { userId, courseId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: MOCK_EXAM_LIST_LIMIT,
       select: {
         id: true, length: true, difficulty: true, topics: true, includeGenerated: true, status: true, createdAt: true, submittedAt: true,
-        timeLimitMinutes: true, startedAt: true, timedOut: true,
+        markedAt: true, timeLimitMinutes: true, startedAt: true, timedOut: true,
       },
     });
   } catch (error) {

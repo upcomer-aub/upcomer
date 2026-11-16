@@ -581,6 +581,22 @@ After pulling, run `npx prisma generate` and `npx prisma migrate deploy`. One mi
 - **Tests:** `tests/unit/mock-marking-rules.test.ts`, `tests/unit/mock-marking.test.ts`, `tests/unit/mock-marking-pages.test.tsx`, `tests/integration/mock-marking.test.ts`, `tests/e2e/mock-marking.spec.ts`, the marked exam page in `npm run availability`, and `npm run load -- mock-marking`. Details: `MOCK_MARKING_REPORT.md`.
 - **Shared files changed:** `prisma/schema.prisma` (the model, the enum, the columns, back-relations on `QuestionGroup`, `Course`, `User`), the migration, `lib/mock-exams.ts` (the marking fields in `getMockExam`'s select), `app/courses/[courseId]/mock-exams/actions.ts` (marks after a submit), the exam page (lazy marking and one line saying whether it was marked), `components/mock-exam-sitting.tsx` and its CSS (the marking under each answer), `tests/unit/mock-exam-pages.test.tsx` (one mock line), `app/admin/questions/page.tsx` (the "Answer keys" link), `lib/logger.ts` (eight events), `tests/availability/run.ts`, `.env.example`, and `README.md`.
 
+### Mock exam results report (US-50, Mohammed Al-Haiqi, Sprint 4)
+
+No migration: the report is built from US-49's stored marking.
+
+**Acceptance (sprint plan):** after grading, the score and the topic breakdown reflect the actual answers and the missed items.
+
+- **Where.** `/courses/:courseId/mock-exams/:mockExamId/results`, linked as "See your results" from a marked exam and as "Results" in the exams list. Only the exam's student (by exam ID and session user; anyone else gets not found). An exam in progress says "Submit the exam to see your results." A submitted exam that is not marked yet is marked first.
+- **Score.** "X of Y marked questions fully correct", plus the share of key points covered, averaged over the marked questions, so a partly correct answer counts in part. **Questions without an answer key never count**: they are listed apart ("not marked, because it has no answer key"), and when nothing could be marked there is no score.
+- **By topic.** One row per topic, weakest first (lowest share of key points covered), topics that could not be marked last. Each row has the questions, correct, partly, incorrect, not answered, not marked, and key points covered.
+- **What you missed.** Every partly correct, incorrect and unanswered question in exam order, with its missed key points and explanation, then the unmarked ones.
+- **Pure.** `buildResultsReport` in `lib/mock-results-rules.ts` builds the whole report from the stored outcomes and key points only; `lib/mock-results.ts` reads the exam.
+- **DoS:** `MOCK_RESULTS_RATE_LIMIT_PER_MINUTE` results pages per student per minute (default 60). Over it the page says so and reads nothing.
+- **Logs and responsiveness:** `operation_timed` `mock_results`, and the two events in the events table.
+- **Tests:** `tests/unit/mock-results-rules.test.ts`, `tests/unit/mock-results-page.test.tsx`, `tests/integration/mock-results.test.ts`, `tests/e2e/mock-results.spec.ts`, the results page in `npm run availability` (correct only when the score and the counts match the marked exam), and `npm run load -- mock-results`. Details: `MOCK_RESULTS_REPORT.md`.
+- **Shared files changed:** `lib/mock-exams.ts` (`markedAt` in the exams list), `app/courses/[courseId]/mock-exams/page.tsx` (the "Results" link), the exam page (the "See your results" link), `lib/logger.ts` (two events), `tests/availability/run.ts`, `.env.example`, and `README.md`.
+
 ### Advice from previous students (US-34, US-35, US-37, US-39): open issues
 
 Built by Ali Shammakh at `/courses/:courseId/advice` (`lib/advice.ts`, `lib/advice-rules.ts`), now owned by Mustafa Ergaibi. A review against the stories found no acceptance failure in the code: scopes are checked against the course, only `https://` links are accepted, an anonymous post never carries its author's name or ID to students, and search and filters stay inside the course. These issues are open and **not fixed yet**:
@@ -934,6 +950,7 @@ The levels live in one table, `EVENT_LEVELS` in `lib/logger.ts`, and TypeScript 
 | Mohammed Al-Haiqi (Sprint 4, US-49) | `mock_exam_marking_failed`, `mock_exam_marking_evidence_failed` | error | `userId`, `mockExamId`, `errorType`, `errorCode`; the second means the marks were saved but the learning events were not |
 | Mohammed Al-Haiqi (Sprint 4, US-49) | `answer_key_saved`, `answer_key_removed` | info | `adminId`, `courseId`, `groupId`, `keyPoints` (a count); never a key point or an explanation |
 | Mohammed Al-Haiqi (Sprint 4, US-49) | `answer_key_refused`, `answer_key_rate_limited`, `answer_key_save_failed` | warn / error | `adminId`, `courseId`, `groupId`, `reason` (`points_required`, `too_many_points`, `point_too_long`, `explanation_too_long`, `not_found`), `retryAfterSeconds`, or `errorType` |
+| Mohammed Al-Haiqi (Sprint 4, US-50) | `mock_results_rate_limited`, `mock_results_retrieval_failed` | warn / error | `userId`, `mockExamId`, `retryAfterSeconds` or `errorType` |
 
 ### What is never logged
 

@@ -160,7 +160,9 @@ type LogEvent =
   | "answer_key_removed"
   | "answer_key_refused"
   | "answer_key_rate_limited"
-  | "answer_key_save_failed";
+  | "answer_key_save_failed"
+  | "mock_results_rate_limited"
+  | "mock_results_retrieval_failed";
 
 
 export type { LogEvent };
@@ -370,6 +372,9 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   answer_key_refused: "warn",
   answer_key_rate_limited: "warn",
   answer_key_save_failed: "error",
+  // Mohammed Al-Haiqi (Sprint 4): the mock exam results report (US-50). IDs only.
+  mock_results_rate_limited: "warn",
+  mock_results_retrieval_failed: "error",
 
 };
 

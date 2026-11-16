@@ -135,6 +135,15 @@ const APIS: Api[] = [
       && reply.body.includes("Not marked: no answer key") && reply.body.includes("Your answer does not cover");
     return { reply, expected: [200], correct };
   } },
+  // US-50: correct only when the report's score and breakdown match the marked exam: 3 questions, 2 marked, 1 fully
+  // correct, half the key points of the partly correct one covered (75% overall), 1 not marked.
+  { name: "GET /courses/:courseId/mock-exams/:mockExamId/results", weight: 5, async run(user, world) {
+    const reply = await user.client.get(`/courses/${world.courses[0].id}/mock-exams/${world.marking.exams.get(user.id)}/results`, TIMEOUT_MS);
+    const text = reply.body.replace(/<!-- -->/g, "");
+    const correct = text.includes("<strong>1 of 2</strong> marked questions fully correct · 75% of the key points covered")
+      && text.includes("1 of 3 questions was not marked") && text.includes("congestion avoidance");
+    return { reply, expected: [200], correct };
+  } },
   { name: "GET /files/:fileId", weight: 10, async run(user, world, rng) {
     const reply = await user.client.get(`/files/${rng.pick(world.files)}`, TIMEOUT_MS);
     return { reply, expected: [200], correct: reply.contentType.includes("pdf") && reply.bytes.subarray(0, 5).toString("latin1") === "%PDF-" };
@@ -285,7 +294,7 @@ function startServer(logFile: string) {
   const command = `${process.env.AVAILABILITY_SKIP_BUILD === "1" ? "" : "npm run build && "}npx next start --port ${PORT}`;
   // Logs are not saved to the database during the run, so the run itself does not change what it measures. Each user edits
   // their advice more often than a person would, so the per-student change limit (DoS protection, US-36) is raised.
-  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_REPORT_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
+  const server = spawn(command, { shell: true, detached: process.platform !== "win32", env: { ...process.env, LOG_PERSIST: "off", MOCK_RESULTS_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_CHANGE_RATE_LIMIT_PER_MINUTE: "1000000", ADVICE_REPORT_RATE_LIMIT_PER_MINUTE: "1000000" }, stdio: ["ignore", "pipe", "pipe"] });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);
   return server;

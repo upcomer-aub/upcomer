@@ -28,7 +28,7 @@ export default async function MockExamsPage({ params }: { params: Promise<{ cour
       <h2>Your mock exams</h2>
       <ul className="list question-list">{mine.map(exam => <li className="card" key={exam.id}>
         <Link href={`${base}/${exam.id}`}>{exam.length} questions · {DIFFICULTY_LABELS[exam.difficulty]} · {exam.topics.length ? exam.topics.join(", ") : "All topics"}{exam.includeGenerated ? " · with generated questions" : ""}{exam.timeLimitMinutes !== null ? ` · Timed, ${timeLimitLabel(exam.timeLimitMinutes)}` : ""}</Link>
-        <p className="muted">{exam.timedOut ? "Time is up" : exam.status === "SUBMITTED" ? "Submitted" : exam.timeLimitMinutes !== null && !exam.startedAt ? "Not started" : "In progress"} · created {exam.createdAt.toISOString().slice(0, 10)}</p>
+        <p className="muted">{exam.timedOut ? "Time is up" : exam.status === "SUBMITTED" ? "Submitted" : exam.timeLimitMinutes !== null && !exam.startedAt ? "Not started" : "In progress"} · created {exam.createdAt.toISOString().slice(0, 10)}{exam.markedAt && <>{" ? "}<Link href={`${base}/${exam.id}/results`}>Results</Link></>}</p>
       </li>)}</ul>
     </>}
   </>;

@@ -103,7 +103,7 @@ test("a submitted exam is marked against the keys, mistakes are explained, and t
   await questionCard(page, texts.osi).getByRole("textbox").fill("Seven layers from physical to application.");
   await page.getByRole("button", { name: "Submit exam" }).click();
   await expect(status(page)).toHaveText("Your exam was submitted.");
-  await expect(page.locator("[data-marked]")).toHaveText("Your answers were marked against the answer keys. See each question below.");
+  await expect(page.locator("[data-marked]")).toContainText("Your answers were marked against the answer keys.");
 
   const handshake = questionCard(page, texts.handshake);
   await expect(handshake.locator("[data-outcome]")).toHaveText("Correct");

@@ -105,7 +105,9 @@ test("the admin keeps advice that breaks no rule: its reports are dismissed and 
   await page.goto(queue);
   await queued(page, text.fine).getByRole("button", { name: "Keep advice" }).click();
   await expect(page.getByRole("status").filter({ hasText: "The advice was kept, and its reports are dismissed." })).toBeVisible();
-  await expect(page.getByText("No advice is reported.")).toBeVisible();
+  // Other parallel suites may have their own reports; only this advice should leave the queue.
+  await expect(queued(page, text.fine)).toHaveCount(0);
+  expect(await db.adviceReport.count({ where: { adviceId: ids.fine, status: "OPEN" } })).toBe(0);
   expect((await db.adviceReport.findMany({ where: { adviceId: ids.fine } })).map(entry => entry.status)).toEqual(["DISMISSED"]);
   await page.goto(feed);
   await expect(post(page, text.fine)).toBeVisible();

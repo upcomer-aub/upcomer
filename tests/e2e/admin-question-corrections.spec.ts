@@ -151,7 +151,7 @@ test("an admin cleans old exam rules and can exclude and restore an ambiguous en
     await expect(visitor.getByRole("main")).not.toContainText("Some unfamiliar campus policy details.");
     await regroup(page);
     await page.goto(`/admin/questions/${courseId}`);
-    await expect(page.getByText("Excluded: not a question", { exact: true })).toBeVisible();
+    await expect(page.locator("article.card").filter({ hasText: "Some unfamiliar campus policy details." }).getByText("Excluded: not a question", { exact: true })).toBeVisible();
     await page.goto(reviewRoute);
     await page.getByRole("button", { name: "Restore entry", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Exclusion removed" })).toBeVisible();

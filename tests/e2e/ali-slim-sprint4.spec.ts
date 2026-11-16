@@ -93,7 +93,7 @@ test("US-73: students cannot mutate files; admin replacement and removal update 
   await page.goto(`/admin/files/${fileId}/manage`);
   await page.getByLabel("Replacement file").setInputFiles({ name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from(imageOnlyPdf()) });
   await page.getByRole("button", { name: "Replace file", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("PDF exams must contain readable numbered questions");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("PDF exams must contain readable numbered questions");
   expect(await db.question.count({ where: { fileId } })).toBe(2);
   await page.getByLabel("Replacement file").setInputFiles({ name: "replacement.pdf", mimeType: "application/pdf", buffer: Buffer.from(textPdf([["1. Explain selective repeat retransmission."]])) });
   await page.getByRole("button", { name: "Replace file", exact: true }).click();

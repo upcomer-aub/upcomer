@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdviceForm } from "@/components/advice-form";
 import { AdviceList } from "@/components/advice-list";
-import { getAdviceOptions, searchAdvice } from "@/lib/advice";
+import { allowAdviceFeedRead, getAdviceOptions, searchAdvice } from "@/lib/advice";
 import { topicKeyOf } from "@/lib/advice-rules";
 import { getCurrentUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
@@ -17,6 +17,11 @@ export default async function AdvicePage({ params, searchParams }: { params: Pro
   const course = await getCourseById(courseId);
   if (!course) notFound();
   const user = await getCurrentUser();
+  // DoS protection (US-38): a student over the read limit gets a message and nothing is read from the database.
+  if (user && !allowAdviceFeedRead(user.id)) {
+    return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Advice from previous students</h1>
+      <p className="notice" role="alert">You are opening advice pages too quickly. Wait a minute and try again.</p></>;
+  }
   const filters = { query: q, topic, examId, termId, page: page ? Number(page) : undefined };
   const [result, options] = await Promise.all([searchAdvice(courseId, user?.id ?? null, filters), getAdviceOptions(courseId)]);
   const filtered = Boolean(q?.trim() || topic || examId || termId);

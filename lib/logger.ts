@@ -5,6 +5,7 @@ type LogEvent =
   | "advice_publish_failed"
   | "advice_search_failed"
   | "advice_retrieval_failed"
+  | "advice_feed_rate_limited"
   | "learning_evidence_saved"
   | "learning_evidence_failed"
   | "learning_evidence_refused"
@@ -136,6 +137,7 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   advice_publish_failed: "error",
   advice_search_failed: "error",
   advice_retrieval_failed: "error",
+  advice_feed_rate_limited: "warn",
   learning_evidence_saved: "info",
   learning_evidence_failed: "error",
   learning_evidence_refused: "warn",

@@ -11,7 +11,7 @@ vi.mock("@/lib/logger", () => ({ logError: vi.fn(), errorCode: (error: unknown) 
 vi.mock("@/lib/rate-limit", () => ({ checkRateLimit: vi.fn(() => ({ ok: true })), limitFromEnv: (_name: string, fallback: number) => fallback }));
 
 import { checkRateLimit } from "@/lib/rate-limit";
-import { publishAdvice, searchAdvice, toPublicAdvice, type AdviceRow, type PublishInput } from "@/lib/advice";
+import { publishAdvice, resetAdviceCache, searchAdvice, toPublicAdvice, type AdviceRow, type PublishInput } from "@/lib/advice";
 
 const COURSE = { id: "course-1", code: "CS101" };
 
@@ -27,6 +27,7 @@ const row = (over: Partial<AdviceRow> = {}): AdviceRow => ({
 });
 
 beforeEach(() => {
+  resetAdviceCache();
   vi.clearAllMocks();
   db.course.findUnique.mockResolvedValue(COURSE);
   db.advice.create.mockResolvedValue({ id: "advice-1" });

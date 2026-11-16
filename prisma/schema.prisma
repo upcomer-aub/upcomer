@@ -604,6 +604,15 @@ enum MockExamStatus {
   SUBMITTED
 }
 
+// What a mock exam's topic mix was weighted by (US-47). PROFILE: the student's weakness in each topic and each topic's exam
+// frequency. NO_PROFILE: the student had no profile in the course, so exam frequency only. PROFILE_UNAVAILABLE: the profile
+// could not be read, so exam frequency only.
+enum MockExamMix {
+  PROFILE
+  NO_PROFILE
+  PROFILE_UNAVAILABLE
+}
+
 // One mock exam a student generated for one course (US-45). Only its student ever sees it. The settings are kept, so an
 // alternative version (US-46) can be generated with the same settings. Its questions are copied in, so the exam stays the
 // same when the question bank is rebuilt; see lib/mock-exams.ts.
@@ -616,8 +625,15 @@ model MockExam {
   // The topics asked for (keys as in LearningTopic.topicKey, and their display names). Empty means every topic.
   topicKeys   String[]
   topics      String[]
-  // The number of questions asked for; the exam has exactly this many.
+  // The number of questions the exam has.
   length      Int
+  // The number of questions asked for (US-45): larger than `length` when the chosen topics could not fill it. Null on
+  // exams made before it was kept.
+  requestedLength Int?
+  // US-47: what the topic mix was weighted by (null on exams made before it), and the names of the student's weaker
+  // topics the exam was weighted toward, weakest first, for the line on the exam page.
+  mixBasis    MockExamMix?
+  weakTopics  String[]           @default([])
   difficulty  MockExamDifficulty
   // The student asked for their generated practice questions (US-44) to be mixed in. Kept with the other settings (US-46).
   includeGenerated Boolean       @default(false)

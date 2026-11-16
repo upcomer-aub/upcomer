@@ -9,8 +9,12 @@ const expect = baseExpect.configure({ timeout: 15_000 });
 
 // US-45: a student chooses topics, a length and a difficulty, gets an exam that follows them, and sits it: answers are
 // saved, kept after a reload, and locked on submit. Only its student can open it, tampered settings are refused, and the
-// student's generated practice questions (US-44) are mixed in when asked for. The spec makes one course with two
-// topic-tagged exam papers and two students. Everything is deleted at the end; the course and the students take the
+// student's generated practice questions (US-44) are mixed in when asked for. A request larger than the topics allow gets
+// the largest exam they can give, with a message (US-45). US-47: a student who rated a topic weak gets more of it, and the
+// exam page says why; a student without ratings gets the exam-frequency mix. The spec makes one course with two
+// US-48: a timed exam shows no question before Start, then a countdown from the server's time left; answers autosave, a
+// refresh keeps the time running, and at zero the exam is submitted and locked. Its deadline is shortened in the database
+// instead of waiting ten minutes. The spec makes one course with two topic-tagged exam papers and four students. Everything is deleted at the end; the course and the students take the
 // papers, questions, groups, generated questions and mock exams with them.
 const stamp = String(Date.now()).slice(-8);
 const courseId = `qa-mock-${stamp}`;
@@ -18,6 +22,8 @@ const password = "password123";
 const students = {
   a: { id: `qa-mock-a-${stamp}`, email: `qa-mock-a-${stamp}@mail.aub.edu`, name: "Sits Mocks" },
   b: { id: `qa-mock-b-${stamp}`, email: `qa-mock-b-${stamp}@mail.aub.edu`, name: "Other Student" },
+  c: { id: `qa-mock-c-${stamp}`, email: `qa-mock-c-${stamp}@mail.aub.edu`, name: "Rated Student" },
+  d: { id: `qa-mock-d-${stamp}`, email: `qa-mock-d-${stamp}@mail.aub.edu`, name: "Timed Student" },
 };
 // From the simplest to the most complex: difficulty is estimated from a question's length and its number of parts.
 const tcp = [
@@ -77,12 +83,13 @@ async function logIn(page: Page, email: string) {
   await expect(page).toHaveURL(/\/my-courses$/);
 }
 // Fills the form and generates an exam.
-async function generate(page: Page, settings: { topics?: string[]; length: string; difficulty: string; generated?: boolean }) {
+async function generate(page: Page, settings: { topics?: string[]; length: string; difficulty: string; generated?: boolean; timeLimit?: string }) {
   await page.goto(mockExams);
   for (const topic of settings.topics ?? []) await page.getByRole("checkbox", { name: new RegExp(`^${topic} \\(`) }).check();
   await page.getByLabel("Number of questions").fill(settings.length);
   await page.getByLabel("Difficulty").selectOption({ label: settings.difficulty });
   if (settings.generated) await page.getByRole("checkbox", { name: /Include my generated practice questions/ }).check();
+  if (settings.timeLimit) await page.getByLabel("Time limit").selectOption({ label: settings.timeLimit });
   await page.getByRole("button", { name: "Generate mock exam" }).click();
 }
 const questions = (page: Page) => page.locator("ol.question-list > li");
@@ -93,6 +100,8 @@ const answer = (page: Page, position: number) => page.getByRole("textbox", { nam
 const status = (page: Page) => page.locator("main").getByRole("status");
 const alert = (page: Page) => page.locator("main").getByRole("alert");
 const examCount = () => db.mockExam.count({ where: { courseId } });
+const mixLine = (page: Page) => page.getByTestId("mock-mix");
+const FREQUENCY_ONLY = "You have no ratings or practice results in this course yet, so the mix follows how often each topic comes up in past papers.";
 
 test("a student chooses a topic, a length and a difficulty, and the exam follows them (acceptance test)", async ({ page }) => {
   // A visitor sees what the page is for, logs in, and comes back to the form.
@@ -127,6 +136,8 @@ test("a student chooses a topic, a length and a difficulty, and the exam follows
   await expect(questions(page)).toHaveCount(5);
   const texts = await shown(page);
   expect(texts.some(text => tcp.includes(text)) && texts.some(text => dns.includes(text))).toBe(true);
+  // This student rated nothing, so the mix follows exam frequency only, and the page says so.
+  await expect(mixLine(page)).toHaveText(FREQUENCY_ONLY);
 
   // A length that needs every question of the topic: the page says the difficulty could not choose.
   await generate(page, { topics: ["DNS"], length: "3", difficulty: "Easier" });
@@ -205,17 +216,28 @@ test("only its student can open an exam, and the other student's list is empty",
   await expect(page.getByRole("heading", { name: "Your mock exams" })).toHaveCount(0);
 });
 
-test("settings the course cannot give, and tampered settings, are refused with a message and save nothing", async ({ page }) => {
+test("a request larger than the topics allow gets the largest exam, with a message (US-45)", async ({ page }) => {
   await logIn(page, students.a.email);
   const before = await examCount();
-
-  // More questions than the topic has: the message says how many match, and the form keeps the settings.
   await generate(page, { topics: ["DNS"], length: "5", difficulty: "Harder" });
-  await expect(alert(page)).toHaveText("Only 3 questions match your topics. Choose a shorter exam (3 to 3) or more topics.");
-  await expect(page).toHaveURL(new RegExp(`${mockExams}$`));
-  await expect(page.getByRole("checkbox", { name: "DNS (3 questions)" })).toBeChecked();
-  await expect(page.getByLabel("Number of questions")).toHaveValue("5");
-  await expect(page.getByLabel("Difficulty")).toHaveValue("HARD");
+  await expect(page).toHaveURL(examUrl);
+  const message = "You asked for 5 questions, but your topics have only 3 that fit, so this exam has 3.";
+  await expect(status(page)).toHaveText(message);
+  await expect(page.locator("main")).toContainText("3 questions · Harder · DNS");
+  await expect(questions(page)).toHaveCount(3);
+  expect((await shown(page)).sort()).toEqual([...dns].sort());
+  await page.screenshot({ path: "test-results/mock-exam-shorter.png", fullPage: true });
+  // Still there after a reload, and the exam keeps both lengths.
+  await page.reload();
+  await expect(status(page)).toHaveText(message);
+  const id = page.url().split("/").pop()!.split("?")[0];
+  expect(await db.mockExam.findUniqueOrThrow({ where: { id }, select: { length: true, requestedLength: true } })).toEqual({ length: 3, requestedLength: 5 });
+  expect(await examCount()).toBe(before + 1);
+});
+
+test("tampered settings are refused with a message and save nothing", async ({ page }) => {
+  await logIn(page, students.a.email);
+  const before = await examCount();
 
   // A length outside the limits, sent past the browser's own check.
   await page.goto(mockExams);
@@ -269,6 +291,143 @@ test("generated practice questions are mixed in only when the student asks", asy
   await generate(page, { topics: ["DNS"], length: "3", difficulty: "Mixed", generated: true });
   await expect(questions(page)).toHaveCount(3);
   await expect(page.locator('li[data-kind="generated"]')).toHaveCount(0);
+});
+
+test("a student who rated a topic weak gets more of it, alongside the frequent topics, and is told why (US-47)", async ({ page }) => {
+  await logIn(page, students.c.email);
+  await page.goto(`/courses/${courseId}/confidence`);
+  await page.getByRole("group", { name: "DNS", exact: true }).getByRole("radio", { name: "1 · Not confident", exact: true }).check();
+  await page.getByRole("group", { name: "TCP", exact: true }).getByRole("radio", { name: "5 · Very confident", exact: true }).check();
+  await page.getByRole("button", { name: "Save ratings" }).click();
+  await expect(page.locator("main").getByRole("status")).toContainText("Your ratings were saved.");
+
+  await generate(page, { length: "4", difficulty: "Mixed" });
+  await expect(page).toHaveURL(examUrl);
+  await expect(mixLine(page)).toHaveText("Weighted toward your weaker topic: DNS, and toward the topics that come up most in past papers.");
+  await expect(questions(page)).toHaveCount(4);
+  // Both topics come up in one paper each; without ratings the four questions split 2 and 2 (the first student's exam).
+  // Rated weak, DNS gets three, and TCP still has one.
+  const topics = await questions(page).locator(".eyebrow").allTextContents();
+  expect(topics.filter(text => text.endsWith("· DNS"))).toHaveLength(3);
+  expect(topics.filter(text => text.endsWith("· TCP"))).toHaveLength(1);
+  await page.screenshot({ path: "test-results/mock-exam-weighted.png", fullPage: true });
+
+  // The other student, without ratings, gets the frequency mix for the same settings.
+  await logIn(page, students.a.email);
+  await generate(page, { length: "4", difficulty: "Mixed" });
+  await expect(mixLine(page)).toHaveText(FREQUENCY_ONLY);
+  const plain = await questions(page).locator(".eyebrow").allTextContents();
+  expect(plain.filter(text => text.endsWith("· DNS"))).toHaveLength(2);
+});
+
+test("a timed exam: no question before Start, a countdown, autosave, a refresh keeps the time, and at zero it is submitted and locked (US-48)", async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  const timerText = page.getByTestId("mock-timer");
+  const seconds = async () => { const [minutes, rest] = (await timerText.innerText()).split(":").map(Number); return minutes * 60 + rest; };
+  const saveStatus = page.getByTestId("mock-save-status");
+  await logIn(page, students.d.email);
+
+  // The time limit is off by default, and the suggestion follows the length.
+  await page.goto(mockExams);
+  await expect(page.getByLabel("Time limit")).toHaveValue("");
+  await expect(page.getByTestId("time-limit-hint")).toContainText("Suggested for 10 questions: 30 minutes");
+  await page.getByLabel("Number of questions").fill("3");
+  await expect(page.getByTestId("time-limit-hint")).toContainText("Suggested for 3 questions: 10 minutes");
+
+  // Before Start: the start page, and no question anywhere in the page that was sent.
+  await generate(page, { topics: ["TCP"], length: "3", difficulty: "Easier", timeLimit: "10 minutes" });
+  await expect(page).toHaveURL(examUrl);
+  const url = page.url().split("?")[0];
+  const id = url.split("/").pop()!;
+  await expect(page.getByTestId("mock-start")).toContainText("You have 10 minutes for 3 questions. The questions appear when you press Start.");
+  await expect(page.locator("main")).toContainText("3 questions · Easier · TCP · Timed, 10 minutes");
+  await expect(questions(page)).toHaveCount(0);
+  await expect(timerText).toHaveCount(0);
+  const source = await page.content();
+  for (const text of tcp) expect(source).not.toContain(text.split("\n")[0]);
+  expect(await db.mockExam.findUniqueOrThrow({ where: { id }, select: { startedAt: true, deadlineAt: true } })).toEqual({ startedAt: null, deadlineAt: null });
+
+  // Started: a visible countdown from the configured time, running.
+  await page.getByRole("button", { name: "Start exam" }).click();
+  await expect(timerText).toHaveText(/^(10:00|9:5\d)$/);
+  await expect(page.getByRole("timer")).toContainText("Time left");
+  await expect(questions(page)).toHaveCount(3);
+  const first = await seconds();
+  await expect.poll(seconds).toBeLessThan(first);
+  const stored = await db.mockExam.findUniqueOrThrow({ where: { id }, select: { startedAt: true, deadlineAt: true } });
+  expect(stored.deadlineAt!.getTime() - stored.startedAt!.getTime()).toBe(10 * 60_000);
+
+  // Readable on a 375 px phone in both colour schemes.
+  await page.setViewportSize({ width: 375, height: 800 });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    const box = (await page.getByRole("timer").boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    const colours = await timerText.evaluate(element => [getComputedStyle(element).color, getComputedStyle(element.closest("div")!).backgroundColor]);
+    expect(colours[0]).not.toBe(colours[1]);
+    await page.screenshot({ path: `test-results/mock-exam-timer-375-${colorScheme}.png` });
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // Answers autosave without pressing anything.
+  await answer(page, 1).fill("My first timed answer");
+  await expect(saveStatus).toHaveText("Unsaved changes. They are saved every few seconds.");
+  await expect(saveStatus).toHaveText("All changes saved.", { timeout: 25_000 });
+  const savedAnswers = () => db.mockExamQuestion.findMany({ where: { mockExamId: id }, orderBy: { position: "asc" }, select: { answer: true } }).then(rows => rows.map(row => row.answer));
+  expect(await savedAnswers()).toEqual(["My first timed answer", null, null]);
+
+  // Leaving and coming back: the answer is there and the timer kept running.
+  const beforeReload = await seconds();
+  await page.goto("/my-courses");
+  await page.goto(url);
+  await expect(answer(page, 1)).toHaveValue("My first timed answer");
+  expect(await seconds()).toBeLessThanOrEqual(beforeReload);
+  expect((await db.mockExam.findUniqueOrThrow({ where: { id }, select: { deadlineAt: true } })).deadlineAt).toEqual(stored.deadlineAt);
+
+  // The time is about to run out (the deadline is moved; the server is the clock). A second window without JavaScript
+  // opens the same exam, to try a plain save after the end.
+  await db.mockExam.update({ where: { id }, data: { deadlineAt: new Date(Date.now() + 14_000) } });
+  const plain = await browser.newContext({ javaScriptEnabled: false, storageState: await page.context().storageState() });
+  const plainPage = await plain.newPage();
+  await plainPage.goto(url);
+  // Without JavaScript the page still shows the time left when it was made (Playwright does not render <noscript>).
+  await expect(plainPage.getByTestId("mock-timer")).toHaveText(/^0:\d\d$/);
+  await page.reload();
+  await expect(page.getByRole("timer").locator("..")).toHaveAttribute("data-level", "urgent");
+  expect(await seconds()).toBeLessThanOrEqual(14);
+  // Typed in the last seconds and never saved by hand: the final save at zero takes it.
+  await answer(page, 2).fill("Typed just before the end");
+  await page.screenshot({ path: "test-results/mock-exam-timer-urgent.png" });
+
+  // At zero: submitted automatically, said so, and locked.
+  await expect(page.getByTestId("mock-time-up")).toHaveText("Time is up — your answers were submitted automatically.", { timeout: 40_000 });
+  await expect(page.locator("main")).not.toContainText("Your exam was submitted.");
+  await expect(timerText).toHaveCount(0);
+  await expect(answer(page, 1)).toHaveAttribute("readonly", "");
+  await expect(answer(page, 2)).toHaveValue("Typed just before the end");
+  await expect(page.getByRole("button", { name: "Save progress" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit exam" })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/mock-exam-time-up.png", fullPage: true });
+  const ended = await db.mockExam.findUniqueOrThrow({ where: { id }, select: { status: true, timedOut: true, submittedAt: true, deadlineAt: true } });
+  expect(ended).toMatchObject({ status: "SUBMITTED", timedOut: true });
+  expect(ended.submittedAt).toEqual(ended.deadlineAt);
+  expect(await savedAnswers()).toEqual(["My first timed answer", "Typed just before the end", null]);
+
+  // A plain save from the window that was left open is refused: nothing changes, and it says time is up.
+  await plainPage.getByRole("textbox", { name: "Your answer to question 3", exact: true }).fill("Too late");
+  await plainPage.getByRole("button", { name: "Save progress" }).click();
+  await expect(plainPage.getByTestId("mock-time-up")).toBeVisible();
+  await expect(plainPage.getByRole("button", { name: "Save progress" })).toHaveCount(0);
+  expect(await savedAnswers()).toEqual(["My first timed answer", "Typed just before the end", null]);
+  await plain.close();
+
+  // The list tells a timed-out exam from the others.
+  await page.goto(mockExams);
+  await expect(page.getByRole("link", { name: "3 questions · Easier · TCP · Timed, 10 minutes" })).toBeVisible();
+  await expect(page.getByText(/^Time is up · created/)).toHaveCount(1);
 });
 
 for (const colorScheme of ["light", "dark"] as const) {

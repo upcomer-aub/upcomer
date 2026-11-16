@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getCourseById } from "@/lib/courses";
 import { getMockExamOptions, listMyMockExams } from "@/lib/mock-exams";
 import { DIFFICULTY_LABELS } from "@/lib/mock-exam-rules";
+import { timeLimitLabel } from "@/lib/mock-exam-timing";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export default async function MockExamsPage({ params }: { params: Promise<{ cour
   const [options, mine] = await Promise.all([getMockExamOptions(courseId, user?.id), user ? listMyMockExams(user.id, courseId) : Promise.resolve([])]);
   const base = `/courses/${courseId}/mock-exams`;
   return <><Link className="back" href={`/courses/${courseId}`}>← Back to {course.code}</Link><span className="eyebrow">{course.code}</span><h1>Mock Exams</h1>
-    <p className="muted">Generate a practice exam from this course&apos;s previous exam questions. Choose the topics, the number of questions, and the difficulty.</p>
+    <p className="muted">Generate a practice exam from this course&apos;s previous exam questions. Choose the topics, the number of questions, and the difficulty, and a time limit if you want one.</p>
     {options.total === 0
       ? <p className="card muted">No questions have been extracted for this course yet, so a mock exam can&apos;t be made.</p>
       : user
@@ -26,8 +27,8 @@ export default async function MockExamsPage({ params }: { params: Promise<{ cour
     {mine.length > 0 && <>
       <h2>Your mock exams</h2>
       <ul className="list question-list">{mine.map(exam => <li className="card" key={exam.id}>
-        <Link href={`${base}/${exam.id}`}>{exam.length} questions · {DIFFICULTY_LABELS[exam.difficulty]} · {exam.topics.length ? exam.topics.join(", ") : "All topics"}{exam.includeGenerated ? " · with generated questions" : ""}</Link>
-        <p className="muted">{exam.status === "SUBMITTED" ? "Submitted" : "In progress"} · created {exam.createdAt.toISOString().slice(0, 10)}</p>
+        <Link href={`${base}/${exam.id}`}>{exam.length} questions · {DIFFICULTY_LABELS[exam.difficulty]} · {exam.topics.length ? exam.topics.join(", ") : "All topics"}{exam.includeGenerated ? " · with generated questions" : ""}{exam.timeLimitMinutes !== null ? ` · Timed, ${timeLimitLabel(exam.timeLimitMinutes)}` : ""}</Link>
+        <p className="muted">{exam.timedOut ? "Time is up" : exam.status === "SUBMITTED" ? "Submitted" : exam.timeLimitMinutes !== null && !exam.startedAt ? "Not started" : "In progress"} · created {exam.createdAt.toISOString().slice(0, 10)}</p>
       </li>)}</ul>
     </>}
   </>;

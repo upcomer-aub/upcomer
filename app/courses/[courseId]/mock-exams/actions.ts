@@ -1,9 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
-import { createMockExam, saveMockExam } from "@/lib/mock-exams";
-import type { MockExamError, MockExamFormValues } from "@/lib/mock-exam-rules";
+import { getCurrentUser, requireUser } from "@/lib/auth";
+import { createMockExam, saveMockExam, startMockExam } from "@/lib/mock-exams";
+import type { MockExamError, MockExamFormValues, SittingError } from "@/lib/mock-exam-rules";
 
 export type MockExamFormState = { status: "idle" | "error"; error?: MockExamError; available?: number; values?: MockExamFormValues };
 
@@ -18,21 +18,46 @@ export async function createMockExamAction(_previous: MockExamFormState, formDat
   const user = await requireUser(route);
   const values: MockExamFormValues = {
     length: field(formData, "length"), difficulty: field(formData, "difficulty"), topics: formData.getAll("topic").map(String),
-    includeGenerated: formData.get("includeGenerated") === "on",
+    includeGenerated: formData.get("includeGenerated") === "on", timeLimit: field(formData, "timeLimit"),
   };
   const result = await createMockExam(user.id, { courseId, ...values });
   if (!result.ok) return { status: "error", error: result.error, available: result.available, values };
   redirect(`${route}/${encodeURIComponent(result.id)}${result.difficultyApplied ? "" : "?same=1"}`);
 }
 
-// "Save progress" and "Submit exam" are two buttons of one form; the clicked one's value arrives as `intent`.
-export async function saveMockExamAction(formData: FormData) {
-  const courseId = field(formData, "courseId");
-  const mockExamId = field(formData, "mockExamId");
-  const route = `/courses/${encodeURIComponent(courseId)}/mock-exams/${encodeURIComponent(mockExamId)}`;
-  const user = await requireUser(route);
+const examRoute = (formData: FormData) => `/courses/${encodeURIComponent(field(formData, "courseId"))}/mock-exams/${encodeURIComponent(field(formData, "mockExamId"))}`;
+const answersOf = (formData: FormData) => {
   const answers: Record<string, string> = {};
   for (const [key, value] of formData.entries()) if (key.startsWith("answer_") && typeof value === "string") answers[key.slice("answer_".length)] = value;
+  return answers;
+};
+
+// Starts the session student's timed exam (US-48): a plain POST form. The server sets the start and the deadline.
+export async function startMockExamAction(formData: FormData) {
+  const route = examRoute(formData);
+  const user = await requireUser(route);
+  const result = await startMockExam(user.id, field(formData, "mockExamId"));
+  redirect(result.ok ? route : `${route}?${new URLSearchParams({ error: result.error })}`);
+}
+
+export type AutosaveResult = { ok: true; remainingMs?: number; timedOut: boolean } | { ok: false; error: SittingError | "signed_out" };
+
+// The countdown's saves (US-48): every few seconds, and the final one at zero (`intent=finish`). It answers instead of
+// redirecting, so the page and what is typed stay as they are, and it returns only the server's time left: never a
+// question or an answer. A student whose session ended is told so; they are not sent away from their typed answers.
+export async function autosaveMockExamAction(formData: FormData): Promise<AutosaveResult> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "signed_out" };
+  const result = await saveMockExam(user.id, field(formData, "mockExamId"), answersOf(formData), field(formData, "intent") === "finish" ? "finish" : "save");
+  return result.ok ? { ok: true, remainingMs: result.remainingMs, timedOut: result.timedOut === true } : { ok: false, error: result.error };
+}
+
+// "Save progress" and "Submit exam" are two buttons of one form; the clicked one's value arrives as `intent`.
+export async function saveMockExamAction(formData: FormData) {
+  const mockExamId = field(formData, "mockExamId");
+  const route = examRoute(formData);
+  const user = await requireUser(route);
+  const answers = answersOf(formData);
   const submit = field(formData, "intent") === "submit";
   const result = await saveMockExam(user.id, mockExamId, answers, submit);
   redirect(`${route}?${new URLSearchParams(result.ok ? { [submit ? "submitted" : "saved"]: "1" } : { error: result.error })}`);

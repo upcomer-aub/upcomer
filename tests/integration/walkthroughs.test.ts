@@ -13,6 +13,7 @@ vi.mock("@/lib/ai-client", () => ai);
 
 import { getConsolidatedExam } from "@/lib/consolidated-exam";
 import { db } from "@/lib/db";
+import { createMockExam, getMockExam } from "@/lib/mock-exams";
 import { rebuildQuestionBank } from "@/lib/question-bank";
 import { resetRateLimits } from "@/lib/rate-limit";
 import { WALKTHROUGH_PROMPT_VERSION } from "@/lib/walkthrough-rules";
@@ -175,6 +176,46 @@ describe("US-51 walkthroughs on the real database", () => {
     const linked = exam.questions.map(item => item.sourceQuestionId);
     expect(linked).not.toContain(ids.pending);
     expect(linked).not.toContain(ids.material);
+  });
+
+  it("refuses a question excluded from the bank, and the Upcomer Exam never links one", async () => {
+    const fileId = (await db.question.findUniqueOrThrow({ where: { id: ids.published } })).fileId;
+    // A second copy of the published question, so it would share its group if it were not excluded.
+    const excluded = await db.question.create({ data: { fileId, number: 9, text: TEXT, excludedFromBank: true } });
+    try {
+      expect(await rebuildQuestionBank(ids.course)).toMatchObject({ ok: true });
+      expect(await generateWalkthrough(ids.student, ids.course, excluded.id)).toEqual({ ok: false, error: "not_found" });
+      expect(await getWalkthroughPage(ids.student, ids.course, excluded.id)).toBeNull();
+      expect(ai.chatCompletion).not.toHaveBeenCalled();
+      expect(await rows(excluded.id)).toEqual([]);
+      const linked = (await getConsolidatedExam(ids.course)).questions.map(item => item.sourceQuestionId);
+      expect(linked).not.toContain(excluded.id);
+      expect(linked).toContain(ids.published);
+    } finally {
+      await db.question.delete({ where: { id: excluded.id } });
+    }
+  });
+
+  it("a submitted mock exam gives each past-paper question's source, which the walkthrough page accepts (6b)", async () => {
+    const fileId = (await db.question.findUniqueOrThrow({ where: { id: ids.published } })).fileId;
+    // Three more distinct questions of their own, so the course has enough for a 3-question exam whatever ran before.
+    const extra = await Promise.all(["Explain how DNS caching reduces lookup time", "State the purpose of an MX record", "Describe iterative DNS resolution"]
+      .map((text, index) => db.question.create({ data: { fileId, number: 20 + index, text } })));
+    try {
+      expect(await rebuildQuestionBank(ids.course)).toMatchObject({ ok: true });
+      process.env.MOCK_EXAM_RATE_LIMIT_PER_HOUR = "1000";
+      const created = await createMockExam(ids.student, { courseId: ids.course, length: "3", difficulty: "MIXED", topics: [] });
+      if (!created.ok) throw new Error(`mock exam not created: ${created.error}`);
+      const exam = await getMockExam(ids.student, created.id);
+      expect(exam?.questions.length).toBe(3);
+      for (const item of exam!.questions) {
+        expect(item.questionId).toBeTruthy();
+        expect((await getWalkthroughPage(ids.student, ids.course, item.questionId!))?.question.id).toBe(item.questionId);
+      }
+    } finally {
+      await db.question.deleteMany({ where: { id: { in: extra.map(question => question.id) } } });
+      delete process.env.MOCK_EXAM_RATE_LIMIT_PER_HOUR;
+    }
   });
 
   it("deleting the question deletes its walkthroughs", async () => {

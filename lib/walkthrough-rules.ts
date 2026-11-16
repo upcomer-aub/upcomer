@@ -3,9 +3,10 @@ import type { AiMessage } from "@/lib/ai-client";
 // US-51 (Lea Tass): step-by-step walkthroughs of past-exam questions. Pure rules shared by the service, the action and the
 // page: the prompt, the strict parsing of the model's answer, the grounding check, and the messages.
 //
-// Past papers have no answer keys, so the only thing a step can be checked against is the question itself. A step counts as
-// supported only when it quotes a meaningful run of the question's own words; every other step is flagged as unverified
-// with its reason. The model's own claim of support is never trusted.
+// The walkthrough uses only the question text: it does not read answer keys (US-49's AnswerKey) or any other data, so the
+// only thing a step can be checked against is the question itself. A step counts as supported only when it quotes a
+// meaningful run of the question's own words; every other step is flagged as unverified with its reason. The model's own
+// claim of support is never trusted.
 
 // Bump when the prompt or the step format changes, so stored walkthroughs made by an older prompt are not reused.
 export const WALKTHROUGH_PROMPT_VERSION = "1";

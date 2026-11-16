@@ -90,16 +90,18 @@ describe("walkthrough page: a stored walkthrough (US-51)", () => {
     expect(html.match(/<blockquote/g)).toHaveLength(1);
   });
 
-  it("states how many steps are unverified and that there is no answer key", async () => {
+  it("states how many steps are unverified and that steps were checked against the question text only", async () => {
     const html = await page();
     expect(html).toContain("3 steps. 2 of 3 steps are unverified: they do not come from the question&#x27;s own words.");
-    expect(html).toContain("There is no official answer key for this question, so no step has been checked against a correct answer.");
+    expect(html).toContain("Steps were checked against the question text only, not against an answer key.");
+    // True whether or not an admin wrote an answer key (US-49): the page never claims there is none.
+    expect(html).not.toMatch(/no official answer key/i);
     mocks.getWalkthroughPage.mockResolvedValue(stored({ steps: [steps[0], steps[1]] }));
     expect(await page()).toContain("2 steps. 1 of 2 steps is unverified: it does not come from");
     mocks.getWalkthroughPage.mockResolvedValue(stored({ steps: [steps[0], steps[0]] }));
     const allQuoted = await page();
     expect(allQuoted).toContain("2 steps. Every step quotes the question.");
-    expect(allQuoted).toContain("There is no official answer key");
+    expect(allQuoted).toContain("Steps were checked against the question text only, not against an answer key.");
   });
 
   it("shows anything the model wrote as plain text, never as HTML", async () => {

@@ -17,7 +17,7 @@ export function WalkthroughSteps({ steps, createdAt }: { steps: WalkthroughStep[
       {steps.length} steps. {unverified === 0
         ? "Every step quotes the question."
         : `${unverified} of ${steps.length} steps ${unverified === 1 ? "is" : "are"} unverified: ${unverified === 1 ? "it does" : "they do"} not come from the question's own words.`}
-      {" "}There is no official answer key for this question, so no step has been checked against a correct answer.
+      {" "}Steps were checked against the question text only, not against an answer key.
     </p>
     <ol className={styles.steps}>{steps.map((step, index) => <li className={`card ${styles.step}`} key={index} data-verified={step.verified}>
       <h3 className={styles.title}><span className={styles.number}>Step {index + 1}:</span> {step.title}</h3>

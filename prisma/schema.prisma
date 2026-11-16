@@ -812,7 +812,7 @@ model MockExamQuestion {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Step-by-step walkthroughs of past-exam questions (US-51, Lea Tass). Added in migration 20261120000000_question_walkthroughs.
+// Step-by-step walkthroughs of past-exam questions (US-51, Lea Tass). Added in migration 20261121000000_question_walkthroughs.
 // ---------------------------------------------------------------------------------------------------------------------
 
 // One AI-generated walkthrough of one stored past-exam question, shared by every student who opens it. Only a walkthrough

@@ -40,11 +40,12 @@ export type WalkthroughQuestion = {
   courseLabel: string;
 };
 
-// The question, only when it is on a published exam paper of this course; otherwise null (not found).
+// The question, only when it is on a published exam paper of this course and not excluded from the question bank (an
+// extraction an admin or the rebuild marked as not a real question); otherwise null (not found), the same for every case.
 async function findQuestion(courseId: string, questionId: string): Promise<WalkthroughQuestion | null> {
   if (!courseId || !questionId) return null;
   const row = await db.question.findFirst({
-    where: { id: questionId, file: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES } },
+    where: { id: questionId, excludedFromBank: false, file: { courseId, category: FileCategory.EXAM, ...PUBLISHED_FILES } },
     select: { id: true, text: true, file: { select: { courseId: true, title: true, year: true, topic: true, course: { select: { code: true, name: true } } } } },
   });
   if (!row) return null;

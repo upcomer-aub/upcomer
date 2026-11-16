@@ -58,11 +58,22 @@ beforeEach(() => {
 });
 
 describe("which questions are accepted (US-51)", () => {
-  it("reads only a question of a published exam paper of the course", async () => {
+  it("reads only a question of a published exam paper of the course that is not excluded from the bank", async () => {
     await generate();
     expect(db.question.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "q-1", file: { courseId: "course-1", category: "EXAM", status: "PUBLISHED" } },
+      where: { id: "q-1", excludedFromBank: false, file: { courseId: "course-1", category: "EXAM", status: "PUBLISHED" } },
     }));
+    await getWalkthroughPage("student-1", "course-1", "q-1");
+    expect(db.question.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ excludedFromBank: false }) }));
+  });
+
+  it("refuses a question excluded from the bank as not found, like an unpublished paper, without calling the AI", async () => {
+    // The excludedFromBank filter excludes it, so the database returns nothing.
+    db.question.findFirst.mockResolvedValue(null);
+    expect(await generate("student-1", "course-1", "q-excluded")).toEqual({ ok: false, error: "not_found" });
+    expect(await getWalkthroughPage("student-1", "course-1", "q-excluded")).toBeNull();
+    expect(ai.chatCompletion).not.toHaveBeenCalled();
+    expect(events()).toEqual([{ event: "walkthrough_refused", userId: "student-1", courseId: "course-1", questionId: "q-excluded", reason: "not_found" }]);
   });
 
   it("refuses a question of another course, or of an unpublished paper, as not found, without calling the AI", async () => {

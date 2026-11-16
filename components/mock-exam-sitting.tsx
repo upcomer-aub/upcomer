@@ -44,6 +44,8 @@ export function MockExamSitting({ exam }: { exam: MockExamView }) {
         {question.matchedPoints.length > 0 && <p className="muted">Covered: {question.matchedPoints.map(point => `"${point}"`).join("; ")}</p>}
         {question.feedback && <p className={styles.feedback}>{question.feedback}</p>}
       </div>}
+      {/* US-51: a step-by-step walkthrough of a past-paper question, once the exam is submitted (a generated question has none). */}
+      {submitted && question.questionId && <p className="muted"><a href={`/courses/${encodeURIComponent(exam.courseId)}/questions/${encodeURIComponent(question.questionId)}/walkthrough`} aria-label={`Step-by-step walkthrough of question ${question.position}`}>Step-by-step walkthrough</a> (AI-generated)</p>}
     </li>)}</ol>
     {submitted
       ? <p className="muted">{exam.timedOut ? "Time ran out, so the answers saved by then were submitted. They are locked." : "Submitted. Your answers are locked."}{exam.markedAt && " Each answer is marked only against the key points an admin wrote for the question; a question without a key is not marked."}</p>

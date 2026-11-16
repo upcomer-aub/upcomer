@@ -77,7 +77,8 @@ test("course IDs containing % and _ match only themselves, never as wildcards", 
   await expect(page.getByText("2 distinct questions from 1 previous exam,")).toBeVisible();
   await expect(page.locator("li[data-tier] > p.muted")).toHaveText(["Appeared in 1 of 1 paper", "Appeared in 1 of 1 paper"]);
   await expect(page.locator("li[data-tier] > p").filter({ hasText: "100%" })).toHaveText("What does 100% mean in a_b?");
-  for (const link of await page.locator("li[data-tier] a").all()) await expect(link).toHaveAttribute("href", `/files/${encodeURIComponent(`${underscoreId}-1`)}`);
+  // Only the source-paper links (US-51 adds a walkthrough link to each card, outside the source papers).
+  for (const link of await page.locator("li[data-tier] details a").all()) await expect(link).toHaveAttribute("href", `/files/${encodeURIComponent(`${underscoreId}-1`)}`);
 
   await page.goto(examUrl(lookalikeId));
   await expect(page.locator("li[data-tier] > p.muted")).toHaveText(["Appeared in 2 of 2 papers"]);

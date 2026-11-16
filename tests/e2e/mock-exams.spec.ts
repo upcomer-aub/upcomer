@@ -9,8 +9,10 @@ const expect = baseExpect.configure({ timeout: 15_000 });
 
 // US-45: a student chooses topics, a length and a difficulty, gets an exam that follows them, and sits it: answers are
 // saved, kept after a reload, and locked on submit. Only its student can open it, tampered settings are refused, and the
-// student's generated practice questions (US-44) are mixed in when asked for. The spec makes one course with two
-// topic-tagged exam papers and two students. Everything is deleted at the end; the course and the students take the
+// student's generated practice questions (US-44) are mixed in when asked for. A request larger than the topics allow gets
+// the largest exam they can give, with a message (US-45). US-47: a student who rated a topic weak gets more of it, and the
+// exam page says why; a student without ratings gets the exam-frequency mix. The spec makes one course with two
+// topic-tagged exam papers and three students. Everything is deleted at the end; the course and the students take the
 // papers, questions, groups, generated questions and mock exams with them.
 const stamp = String(Date.now()).slice(-8);
 const courseId = `qa-mock-${stamp}`;
@@ -18,6 +20,7 @@ const password = "password123";
 const students = {
   a: { id: `qa-mock-a-${stamp}`, email: `qa-mock-a-${stamp}@mail.aub.edu`, name: "Sits Mocks" },
   b: { id: `qa-mock-b-${stamp}`, email: `qa-mock-b-${stamp}@mail.aub.edu`, name: "Other Student" },
+  c: { id: `qa-mock-c-${stamp}`, email: `qa-mock-c-${stamp}@mail.aub.edu`, name: "Rated Student" },
 };
 // From the simplest to the most complex: difficulty is estimated from a question's length and its number of parts.
 const tcp = [
@@ -93,6 +96,8 @@ const answer = (page: Page, position: number) => page.getByRole("textbox", { nam
 const status = (page: Page) => page.locator("main").getByRole("status");
 const alert = (page: Page) => page.locator("main").getByRole("alert");
 const examCount = () => db.mockExam.count({ where: { courseId } });
+const mixLine = (page: Page) => page.getByTestId("mock-mix");
+const FREQUENCY_ONLY = "You have no ratings or practice results in this course yet, so the mix follows how often each topic comes up in past papers.";
 
 test("a student chooses a topic, a length and a difficulty, and the exam follows them (acceptance test)", async ({ page }) => {
   // A visitor sees what the page is for, logs in, and comes back to the form.
@@ -127,6 +132,8 @@ test("a student chooses a topic, a length and a difficulty, and the exam follows
   await expect(questions(page)).toHaveCount(5);
   const texts = await shown(page);
   expect(texts.some(text => tcp.includes(text)) && texts.some(text => dns.includes(text))).toBe(true);
+  // This student rated nothing, so the mix follows exam frequency only, and the page says so.
+  await expect(mixLine(page)).toHaveText(FREQUENCY_ONLY);
 
   // A length that needs every question of the topic: the page says the difficulty could not choose.
   await generate(page, { topics: ["DNS"], length: "3", difficulty: "Easier" });
@@ -205,17 +212,28 @@ test("only its student can open an exam, and the other student's list is empty",
   await expect(page.getByRole("heading", { name: "Your mock exams" })).toHaveCount(0);
 });
 
-test("settings the course cannot give, and tampered settings, are refused with a message and save nothing", async ({ page }) => {
+test("a request larger than the topics allow gets the largest exam, with a message (US-45)", async ({ page }) => {
   await logIn(page, students.a.email);
   const before = await examCount();
-
-  // More questions than the topic has: the message says how many match, and the form keeps the settings.
   await generate(page, { topics: ["DNS"], length: "5", difficulty: "Harder" });
-  await expect(alert(page)).toHaveText("Only 3 questions match your topics. Choose a shorter exam (3 to 3) or more topics.");
-  await expect(page).toHaveURL(new RegExp(`${mockExams}$`));
-  await expect(page.getByRole("checkbox", { name: "DNS (3 questions)" })).toBeChecked();
-  await expect(page.getByLabel("Number of questions")).toHaveValue("5");
-  await expect(page.getByLabel("Difficulty")).toHaveValue("HARD");
+  await expect(page).toHaveURL(examUrl);
+  const message = "You asked for 5 questions, but your topics have only 3 that fit, so this exam has 3.";
+  await expect(status(page)).toHaveText(message);
+  await expect(page.locator("main")).toContainText("3 questions · Harder · DNS");
+  await expect(questions(page)).toHaveCount(3);
+  expect((await shown(page)).sort()).toEqual([...dns].sort());
+  await page.screenshot({ path: "test-results/mock-exam-shorter.png", fullPage: true });
+  // Still there after a reload, and the exam keeps both lengths.
+  await page.reload();
+  await expect(status(page)).toHaveText(message);
+  const id = page.url().split("/").pop()!.split("?")[0];
+  expect(await db.mockExam.findUniqueOrThrow({ where: { id }, select: { length: true, requestedLength: true } })).toEqual({ length: 3, requestedLength: 5 });
+  expect(await examCount()).toBe(before + 1);
+});
+
+test("tampered settings are refused with a message and save nothing", async ({ page }) => {
+  await logIn(page, students.a.email);
+  const before = await examCount();
 
   // A length outside the limits, sent past the browser's own check.
   await page.goto(mockExams);
@@ -269,6 +287,33 @@ test("generated practice questions are mixed in only when the student asks", asy
   await generate(page, { topics: ["DNS"], length: "3", difficulty: "Mixed", generated: true });
   await expect(questions(page)).toHaveCount(3);
   await expect(page.locator('li[data-kind="generated"]')).toHaveCount(0);
+});
+
+test("a student who rated a topic weak gets more of it, alongside the frequent topics, and is told why (US-47)", async ({ page }) => {
+  await logIn(page, students.c.email);
+  await page.goto(`/courses/${courseId}/confidence`);
+  await page.getByRole("group", { name: "DNS", exact: true }).getByRole("radio", { name: "1 · Not confident", exact: true }).check();
+  await page.getByRole("group", { name: "TCP", exact: true }).getByRole("radio", { name: "5 · Very confident", exact: true }).check();
+  await page.getByRole("button", { name: "Save ratings" }).click();
+  await expect(page.locator("main").getByRole("status")).toContainText("Your ratings were saved.");
+
+  await generate(page, { length: "4", difficulty: "Mixed" });
+  await expect(page).toHaveURL(examUrl);
+  await expect(mixLine(page)).toHaveText("Weighted toward your weaker topic: DNS, and toward the topics that come up most in past papers.");
+  await expect(questions(page)).toHaveCount(4);
+  // Both topics come up in one paper each; without ratings the four questions split 2 and 2 (the first student's exam).
+  // Rated weak, DNS gets three, and TCP still has one.
+  const topics = await questions(page).locator(".eyebrow").allTextContents();
+  expect(topics.filter(text => text.endsWith("· DNS"))).toHaveLength(3);
+  expect(topics.filter(text => text.endsWith("· TCP"))).toHaveLength(1);
+  await page.screenshot({ path: "test-results/mock-exam-weighted.png", fullPage: true });
+
+  // The other student, without ratings, gets the frequency mix for the same settings.
+  await logIn(page, students.a.email);
+  await generate(page, { length: "4", difficulty: "Mixed" });
+  await expect(mixLine(page)).toHaveText(FREQUENCY_ONLY);
+  const plain = await questions(page).locator(".eyebrow").allTextContents();
+  expect(plain.filter(text => text.endsWith("· DNS"))).toHaveLength(2);
 });
 
 for (const colorScheme of ["light", "dark"] as const) {

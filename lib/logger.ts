@@ -153,6 +153,11 @@ type LogEvent =
   | "mock_exam_version_created"
   | "mock_exam_version_refused"
   | "mock_exam_version_failed"
+  | "walkthrough_generated"
+  | "walkthrough_refused"
+  | "walkthrough_rate_limited"
+  | "walkthrough_failed"
+  | "walkthrough_retrieval_failed"
   | "mock_exam_marked"
   | "mock_exam_marking_failed"
   | "mock_exam_marking_evidence_failed"
@@ -362,6 +367,13 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   mock_exam_version_created: "info",
   mock_exam_version_refused: "warn",
   mock_exam_version_failed: "error",
+  // Lea Tass (Sprint 4): step-by-step walkthroughs of past-exam questions (US-51). IDs, reason codes, error types, the AI's
+  // HTTP status, step counts and the duration only; question, prompt and answer text are never logged.
+  walkthrough_generated: "info",
+  walkthrough_refused: "warn",
+  walkthrough_rate_limited: "warn",
+  walkthrough_failed: "error",
+  walkthrough_retrieval_failed: "error",
   // Mohammed Al-Haiqi (Sprint 4): marking mock exams against answer keys (US-49). IDs, counts and reasons only; never an
   // answer, a key point, or an explanation.
   mock_exam_marked: "info",

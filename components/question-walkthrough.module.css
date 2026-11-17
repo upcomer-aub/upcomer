@@ -1,0 +1,24 @@
+/* US-51: the step-by-step walkthrough of a past-exam question. Theme tokens only, so light and dark mode both work. The
+   status of a step is always written out ("Quoted from the question" or "Unverified"); the outline style only repeats it. */
+.question { margin: 1rem 0; }
+.questionText { margin: .4rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.walkthrough, .generate { margin-top: 1.5rem; }
+.summary { margin: .25rem 0 1rem; overflow-wrap: anywhere; }
+.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: .75rem; }
+.step { min-width: 0; }
+.title { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.number { color: var(--muted); font-weight: 700; }
+.status { margin: .4rem 0 0; overflow-wrap: anywhere; }
+.badge {
+  display: inline-block; border-radius: 999px; padding: .1rem .6rem; font-size: .78rem; font-weight: 700;
+  color: var(--text); white-space: nowrap;
+}
+.quoted { border: 1px solid var(--primary); background: var(--tint); }
+.unverified { border: 1px dashed var(--warn-text); background: var(--warn-bg); color: var(--warn-text); }
+.quote { margin: .6rem 0 0; border-left: 3px solid var(--border); padding: .1rem 0 .1rem .75rem; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
+.explanation { margin: .6rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.form { display: grid; gap: .5rem; justify-items: start; margin-top: .5rem; }
+.form p { margin: 0; }
+.visuallyHidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

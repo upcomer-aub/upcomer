@@ -237,6 +237,8 @@ export async function getMockExam(userId: string, mockExamId: string) {
           select: {
             id: true, position: true, topic: true, text: true, paperCount: true, totalPapers: true, sourcePapers: true, answer: true,
             outcome: true, matchedPoints: true, missedPoints: true, feedback: true,
+            // US-51: the past-paper source question, for the walkthrough link once the exam is submitted (null for generated).
+            questionId: true,
           },
         },
       },

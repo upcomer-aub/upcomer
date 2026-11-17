@@ -287,6 +287,8 @@ model Question {
   generatedQuestions GeneratedPracticeQuestion[]
   // Added for US-45: mock exam questions that record this source question (for US-49's learning events).
   mockExamQuestions  MockExamQuestion[]
+  // Added for US-51: its stored step-by-step walkthroughs.
+  walkthroughs       QuestionWalkthrough[]
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -807,6 +809,30 @@ model MockExamQuestion {
   @@index([groupId])
   @@index([questionId])
   @@index([generatedQuestionId])
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Step-by-step walkthroughs of past-exam questions (US-51, Lea Tass). Added in migration 20261121000000_question_walkthroughs.
+// ---------------------------------------------------------------------------------------------------------------------
+
+// One AI-generated walkthrough of one stored past-exam question, shared by every student who opens it. Only a walkthrough
+// that passed parseWalkthrough in lib/walkthrough-rules.ts is stored: its cleaned, checked steps, never the raw answer, the
+// model's reasoning, or a failed, cut-off or invalid answer. textHash is a hash of the question text it was made from, so
+// after an admin corrects the text a new one is made; promptVersion does the same when the prompt changes. Deleting the
+// question deletes its walkthroughs. See lib/walkthroughs.ts.
+model QuestionWalkthrough {
+  id            String   @id @default(cuid())
+  questionId    String
+  question      Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  textHash      String
+  promptVersion String
+  // The model that wrote it (DEEPSEEK_MODEL when it was made).
+  model         String
+  // WalkthroughStep[]: { title, explanation, basis, quote, verified, unverifiedReason }.
+  steps         Json
+  createdAt     DateTime @default(now())
+
+  @@unique([questionId, textHash, promptVersion])
 }
 
 // How a mock exam answer was marked against its answer key (US-49); see lib/mock-marking-rules.ts.

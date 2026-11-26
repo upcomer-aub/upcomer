@@ -1,6 +1,9 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
+import { fakeKey } from "./tests/fixtures/shared-ai-provider";
 
 const ci = Boolean(process.env.CI);
+const fakeAi = process.env.UPCOMER_E2E_FAKE_AI === "true";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -10,10 +13,16 @@ export default defineConfig({
   webServer: {
     // A production build serves every page precompiled. `next dev` compiles each page on its first request, which can
     // outlast the 5-second waits after a navigation while several workers hit a fresh server.
-    command: "npm run build && npx next start --port 3000",
+    command: fakeAi ? "npx next start --port 3000" : "npm run build && npx next start --port 3000",
+    env: fakeAi ? {
+      NODE_OPTIONS: `--require "${resolve("tests/fixtures/redirect-deepseek.cjs").replaceAll("\\", "/")}"`,
+      DEEPSEEK_API_KEY: fakeKey,
+      AI_PRACTICE_GENERATION_ENABLED: "true",
+      AI_MOCK_FEEDBACK_ENABLED: "true",
+    } : undefined,
     url: "http://127.0.0.1:3000",
     // Locally, a server already on port 3000 (for example `npm run dev`) is reused instead; CI always builds.
-    reuseExistingServer: !ci,
+    reuseExistingServer: !ci && !fakeAi,
     // Room for `next build` before the server starts answering.
     timeout: 300_000,
   },

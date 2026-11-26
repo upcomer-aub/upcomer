@@ -1,6 +1,7 @@
 // Mock exam rules shared by the server, the actions, and the browser form (US-45): limits, messages, and the types of the
 // question selection. The selection itself is in lib/mock-exam-mix.ts (server only). No database access here.
 
+import type { Rubric } from "@/lib/generated-rubric-rules";
 import { isTimeLimit, MOCK_EXAM_TIME_LIMITS, TIME_UP_NOTICE } from "@/lib/mock-exam-timing";
 
 export const MOCK_EXAM_MIN_LENGTH = 3;
@@ -99,6 +100,7 @@ export type PoolQuestion = {
 // One of the student's generated practice questions (US-44) an exam can include. The service reads them only through
 // getGeneratedPracticeQuestions, so every one is the student's own and still matches a published source.
 export type GeneratedCandidate = {
+  approvedRubric?: Rubric;
   // The generated item's ID.
   id: string;
   topicKey: string;

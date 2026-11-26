@@ -7,6 +7,10 @@ export type Difficulty = typeof difficulties[number];
 export const sourceFingerprint = (text: string) => createHash("sha256").update(text).digest("hex");
 export const contentHash = (text: string) => sourceFingerprint(normalizeQuestionText(text));
 export type GenerationSettings = { count: number; difficulty: Difficulty; topicKey?: string };
+export const validGenerationSettings = (settings: GenerationSettings) =>
+  Number.isInteger(settings.count) && settings.count >= 1 && settings.count <= 10
+  && difficulties.includes(settings.difficulty) && (settings.topicKey?.length ?? 0) <= 100;
+
 export function parseGenerationSettings(form: Pick<FormData, "get">): GenerationSettings | null {
   const count = String(form.get("count") ?? "");
   const difficulty = String(form.get("difficulty") ?? "");
@@ -39,13 +43,17 @@ export function groundedPrompts(source: string, difficulty: Difficulty) {
   return tasks[difficulty].map(task => `Course-paper context:\n${source.trim()}\n\nPractice task:\n${task}`);
 }
 
-export type GenerationError = "invalid_settings" | "not_found" | "no_sources" | "insufficient_novel_questions" | "rate_limited" | "unexpected";
+export type GenerationError = "invalid_settings" | "not_found" | "no_sources" | "insufficient_novel_questions" | "rate_limited" | "ai_unavailable" | "ai_rate_limited" | "ai_failed" | "source_changed" | "unexpected";
 const messages: Record<GenerationError, string> = {
   invalid_settings: "Choose 1 to 10 questions and a difficulty.",
   not_found: "This course is not available.",
   no_sources: "No published, topic-tagged exam questions match these settings yet.",
   insufficient_novel_questions: "There are not enough new questions for these settings. Request fewer, choose another topic or difficulty, or add more course papers.",
   rate_limited: "Too many generation requests. Wait a minute and try again.",
+  ai_unavailable: "AI practice is unavailable. You can still use Template practice.",
+  ai_rate_limited: "Too many AI practice requests. Try again later or use Template practice.",
+  ai_failed: "AI practice could not create a valid batch. Try again or use Template practice.",
+  source_changed: "A source changed during generation. Try again or use Template practice.",
   unexpected: "Practice questions could not be generated. Please try again.",
 };
 export const generationMessage = (reason: string) => messages[reason as GenerationError] ?? messages.unexpected;

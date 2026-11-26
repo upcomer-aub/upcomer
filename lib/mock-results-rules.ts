@@ -10,6 +10,8 @@ import { creditOf, type MarkOutcomeName } from "@/lib/mock-marking-rules";
 export type ResultQuestion = {
   id: string; position: number; topic: string | null; text: string;
   outcome: MarkOutcomeName | null; matchedPoints: string[]; missedPoints: string[]; feedback: string | null;
+  aiExplanation?: string;
+  aiFeedbackEligible?: boolean;
 };
 
 export type OutcomeCounts = Record<MarkOutcomeName, number>;

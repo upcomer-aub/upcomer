@@ -68,7 +68,7 @@ test("US-44: generate configured tasks, retain them after refresh, show provenan
   await login(page);
   await page.goto(`/courses/${courseId}/practice/generated`);
   await page.getByLabel("Topic", { exact: true }).selectOption("tcp"); await page.getByLabel("Number of questions").fill("2"); await page.getByLabel("Difficulty", { exact: true }).selectOption("HARD");
-  await page.getByRole("button", { name: "Generate questions", exact: true }).click();
+  await page.getByRole("button", { name: "Template practice", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("New practice questions saved");
   await expect(page.locator("li.card")).toHaveCount(2);
   await expect(page.locator("li.card").first()).toContainText("hard");

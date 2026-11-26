@@ -153,6 +153,9 @@ type LogEvent =
   | "mock_exam_version_created"
   | "mock_exam_version_refused"
   | "mock_exam_version_failed"
+  | "ai_provider_result"
+  | "mock_ai_feedback_failed"
+  | "generated_rubric_review_failed"
   | "walkthrough_generated"
   | "walkthrough_refused"
   | "walkthrough_rate_limited"
@@ -369,6 +372,9 @@ export const EVENT_LEVELS: Record<LogEvent, LogLevel> = {
   mock_exam_version_failed: "error",
   // Lea Tass (Sprint 4): step-by-step walkthroughs of past-exam questions (US-51). IDs, reason codes, error types, the AI's
   // HTTP status, step counts and the duration only; question, prompt and answer text are never logged.
+  ai_provider_result: "info",
+  mock_ai_feedback_failed: "error",
+  generated_rubric_review_failed: "error",
   walkthrough_generated: "info",
   walkthrough_refused: "warn",
   walkthrough_rate_limited: "warn",

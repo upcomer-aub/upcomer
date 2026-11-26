@@ -1,7 +1,6 @@
-// US-51 (Lea Tass): the one place that calls the AI provider (DeepSeek, an OpenAI-compatible chat API, chosen by the team).
-// Plain fetch, no SDK. The key comes only from DEEPSEEK_API_KEY and is sent only in the Authorization header; it is never
-// returned, logged, or put in an error. Only the answer (`choices[0].message.content`) is returned: the model's thinking
-// (`reasoning_content`) is never read. This file logs nothing; callers log the failure reason it returns.
+import { logError } from "@/lib/logger";
+
+// Server-side DeepSeek gateway. Only the completion content is read from a successful response.
 
 export const DEEPSEEK_DEFAULT_URL = "https://api.deepseek.com/chat/completions";
 export const DEEPSEEK_DEFAULT_MODEL = "deepseek-flash";
@@ -17,6 +16,35 @@ export type AiMessage = { role: "system" | "user"; content: string };
 // expected JSON. empty: no answer text. truncated: the answer was cut off (finish_reason "length").
 export type AiFailure = "not_configured" | "timeout" | "network_error" | "http_error" | "malformed" | "empty" | "truncated";
 export type AiResult = { ok: true; content: string; model: string } | { ok: false; error: AiFailure; status?: number };
+
+export type AiPrompt<Input, Output> = {
+  feature: "practice" | "walkthrough" | "mock_feedback";
+  version: string;
+  messages: (input: Input) => AiMessage[];
+  validate: (content: string, input: Input) => { ok: true; value: Output } | { ok: false; error: string };
+};
+
+export async function runAiPrompt<Input, Output>(
+  prompt: AiPrompt<Input, Output>,
+  input: Input,
+  options: ChatOptions = {},
+  request = chatCompletion,
+) {
+  const start = Date.now();
+  const response = await request(prompt.messages(input), options);
+  const parsed = response.ok ? prompt.validate(response.content, input) : null;
+  const env = options.env ?? process.env;
+  logError("ai_provider_result", {
+    feature: prompt.feature,
+    model: response.ok ? response.model : env.DEEPSEEK_MODEL?.trim() || DEEPSEEK_DEFAULT_MODEL,
+    promptVersion: prompt.version,
+    durationMs: String(Date.now() - start),
+    resultCode: response.ok ? (parsed?.ok ? "ok" : "invalid_output") : response.error,
+  });
+  if (!response.ok) return response;
+  if (!parsed?.ok) return { ok: false as const, error: "invalid_output" as const, validationError: parsed?.error };
+  return { ok: true as const, value: parsed.value, model: response.model };
+}
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -84,8 +112,7 @@ export async function chatCompletion(messages: AiMessage[], options: ChatOptions
       response = await fetcher(config.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.key}` },
-        // JSON mode: the model answers with one JSON object only. DeepSeek requires the word "json" in the prompt for it,
-        // which the walkthrough prompt has (lib/walkthrough-rules.ts); the answer is still validated by the caller.
+        // Each feature requests JSON and validates the returned content.
         body: JSON.stringify({ model: config.model, messages, stream: false, max_tokens: options.maxTokens ?? AI_MAX_TOKENS, response_format: { type: "json_object" } }),
         redirect: "error",
         cache: "no-store",

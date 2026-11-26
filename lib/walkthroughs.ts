@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { FileCategory } from "@prisma/client";
-import { chatCompletion, isAiConfigured, type AiFailure } from "@/lib/ai-client";
+import { runAiPrompt, isAiConfigured, type AiFailure } from "@/lib/ai-client";
 import { fullQuestionText } from "@/lib/consolidated-exam";
 import { db } from "@/lib/db";
 import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { errorCode, logError } from "@/lib/logger";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
 import {
-  WALKTHROUGH_PROMPT_VERSION, WALKTHROUGH_QUESTION_MAX_LENGTH, parseWalkthrough, readStoredSteps, walkthroughMessages,
+  WALKTHROUGH_PROMPT_VERSION, WALKTHROUGH_QUESTION_MAX_LENGTH, readStoredSteps, walkthroughPrompt,
   type WalkthroughRefusal, type WalkthroughStep,
 } from "@/lib/walkthrough-rules";
 
@@ -115,17 +115,18 @@ export function resetWalkthroughCalls() {
 }
 
 async function callAndStore(question: WalkthroughQuestion): Promise<CallOutcome> {
-  const answer = await chatCompletion(walkthroughMessages({ question: question.text, topic: question.topic, course: question.courseLabel }));
-  if (!answer.ok) return { ok: false, error: AI_REFUSAL[answer.error], aiError: answer.error, status: answer.status };
-  const parsed = parseWalkthrough(answer.content, question.text);
-  // A failed, cut-off or invalid answer is never stored; the student can try again.
-  if (!parsed.ok) return { ok: false, error: "invalid_output", parseError: parsed.error };
+  const answer = await runAiPrompt(walkthroughPrompt, { question: question.text, topic: question.topic, course: question.courseLabel });
+  if (!answer.ok) {
+    if (answer.error === "invalid_output") return { ok: false, error: "invalid_output", parseError: answer.validationError };
+    return { ok: false, error: AI_REFUSAL[answer.error], aiError: answer.error, status: answer.status };
+  }
+  const steps = answer.value;
   await db.questionWalkthrough.createMany({
-    data: [{ questionId: question.id, textHash: question.textHash, promptVersion: WALKTHROUGH_PROMPT_VERSION, model: answer.model, steps: parsed.steps }],
+    data: [{ questionId: question.id, textHash: question.textHash, promptVersion: WALKTHROUGH_PROMPT_VERSION, model: answer.model, steps }],
     // Another process may have stored one for the same text in the meantime; the first one is kept.
     skipDuplicates: true,
   });
-  return { ok: true, steps: parsed.steps.length, verified: parsed.steps.filter(step => step.verified).length };
+  return { ok: true, steps: steps.length, verified: steps.filter(step => step.verified).length };
 }
 
 export type GenerateResult = { ok: true; stored: boolean } | { ok: false; error: WalkthroughRefusal };

@@ -85,6 +85,15 @@ function explain(missed: string[], explanation: string, unanswered: boolean) {
   return [`${lead} ${missed.map(point => `"${point}"`).join("; ")}.`, explanation].filter(Boolean).join("\n\n");
 }
 
+// Historical marks already carry their key points and the explanation in a deterministic format.
+export function historicalMarkingRubric(item: { matchedPoints: string[]; missedPoints: string[]; feedback: string | null }): AnswerKeyInput {
+  const lead = explain(item.missedPoints, "", false);
+  if (item.feedback === lead) return { keyPoints: [...item.matchedPoints, ...item.missedPoints], explanation: "" };
+  const prefix = `${lead}\n\n`;
+  if (!item.feedback?.startsWith(prefix)) return null;
+  return { keyPoints: [...item.matchedPoints, ...item.missedPoints], explanation: item.feedback.slice(prefix.length) };
+}
+
 // Credit for one question: the share of key points covered (null when it is not marked).
 export const creditOf = (marking: { outcome: MarkOutcomeName; matchedPoints: string[]; missedPoints: string[] }) =>
   marking.outcome === "NO_KEY" ? null : marking.matchedPoints.length / Math.max(1, marking.matchedPoints.length + marking.missedPoints.length);

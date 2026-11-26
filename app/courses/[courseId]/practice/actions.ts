@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { generateAiPracticeQuestions } from "@/lib/ai-practice";
 import { recordPracticeOutcome } from "@/lib/learning-evidence";
 import { generatePracticeQuestions } from "@/lib/practice-generation";
 import { parseGenerationSettings } from "@/lib/practice-generation-rules";
@@ -22,6 +23,12 @@ export async function generatePracticeAction(form: FormData) {
   const user = await requireUser(route);
   const settings = parseGenerationSettings(form);
   if (!settings) redirect(`${route}?error=invalid_settings`);
-  const result = await generatePracticeQuestions(user.id, courseId, settings);
-  redirect(`${route}?${result.ok ? `generated=${result.questions.length}` : `error=${result.error}`}`);
+  const result = form.get("mode") === "ai"
+    ? await generateAiPracticeQuestions(user.id, courseId, settings)
+    : await generatePracticeQuestions(user.id, courseId, settings);
+  if (result.ok) redirect(`${route}?generated=${result.questions.length}`);
+  const query = new URLSearchParams({
+    error: result.error, count: String(settings.count), difficulty: settings.difficulty, topicKey: settings.topicKey ?? "",
+  });
+  redirect(`${route}?${query}`);
 }

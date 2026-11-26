@@ -1,5 +1,6 @@
 import { logError } from "@/lib/logger";
 import { getMockExam } from "@/lib/mock-exams";
+import { eligibleForAiFeedback } from "@/lib/mock-ai-feedback-rules";
 import { markMockExam } from "@/lib/mock-marking";
 import { buildResultsReport, type ResultsReport } from "@/lib/mock-results-rules";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
@@ -31,15 +32,20 @@ export async function getMockResults(userId: string, mockExamId: string): Promis
   const context = { userId, mockExamId: mockExamId.slice(0, 100) };
   try {
     return await timed("mock_results", context, async (): Promise<MockResults> => {
-      let exam = await getMockExam(userId, mockExamId);
+      let exam = await getMockExam(userId, mockExamId, true);
       if (!exam) return { ok: false, error: "not_found" };
       if (exam.status !== "SUBMITTED") return { ok: false, error: "not_submitted" };
       if (!exam.markedAt) {
         await markMockExam(userId, exam.id);
-        exam = await getMockExam(userId, mockExamId);
+        exam = await getMockExam(userId, mockExamId, true);
         if (!exam?.markedAt) return { ok: false, error: "not_marked" };
       }
-      return { ok: true, exam: { id: exam.id, courseId: exam.courseId, markedAt: exam.markedAt }, report: buildResultsReport(exam.questions) };
+      const questions = exam.questions.map(({ id, position, topic, text, outcome, matchedPoints, missedPoints, feedback, answer, aiExplanations }) => ({
+        id, position, topic, text, outcome, matchedPoints, missedPoints, feedback,
+        aiFeedbackEligible: eligibleForAiFeedback({ answer, outcome, missedPoints }),
+        aiExplanation: aiExplanations?.[0]?.explanation,
+      }));
+      return { ok: true, exam: { id: exam.id, courseId: exam.courseId, markedAt: exam.markedAt }, report: buildResultsReport(questions) };
     });
   } catch (error) {
     logError("mock_results_retrieval_failed", { ...context, errorType: errorType(error) });

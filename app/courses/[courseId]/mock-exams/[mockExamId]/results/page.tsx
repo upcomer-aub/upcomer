@@ -5,12 +5,18 @@ import { getCourseById } from "@/lib/courses";
 import { OUTCOME_LABELS } from "@/lib/mock-marking-rules";
 import { allowResultsRead, getMockResults } from "@/lib/mock-results";
 import { percent } from "@/lib/mock-results-rules";
+import { mockAiFeedbackAvailable } from "@/lib/mock-ai-feedback";
+import { mockAiFeedbackMessages } from "@/lib/mock-ai-feedback-rules";
+import { generateMockAiFeedbackAction } from "./feedback-action";
 
 export const dynamic = "force-dynamic";
 
 // The results report of one of the student's own marked mock exams (US-50): the score over the marked questions, the
 // breakdown by topic, what was missed, and which questions could not be marked for lack of an answer key.
-export default async function MockResultsPage({ params }: { params: Promise<{ courseId: string; mockExamId: string }> }) {
+export default async function MockResultsPage({ params, searchParams }: {
+  params: Promise<{ courseId: string; mockExamId: string }>;
+  searchParams?: Promise<{ aiError?: string; item?: string }>;
+}) {
   const { courseId, mockExamId } = await params;
   const examRoute = `/courses/${encodeURIComponent(courseId)}/mock-exams/${encodeURIComponent(mockExamId)}`;
   const user = await requireUser(`${examRoute}/results`);
@@ -31,6 +37,8 @@ export default async function MockResultsPage({ params }: { params: Promise<{ co
       : "Your results could not be prepared yet. Reload the page to try again."}</p></>;
   }
   const { report } = results;
+  const aiAvailable = mockAiFeedbackAvailable();
+  const notice = await searchParams;
   const notMarked = report.counts.NO_KEY;
   return <>{header}
     <section className="card" aria-labelledby="score">
@@ -40,7 +48,7 @@ export default async function MockResultsPage({ params }: { params: Promise<{ co
         : <p data-score>None of the questions could be marked, because none has an answer key yet.</p>}
       <p className="muted">{OUTCOME_LABELS.CORRECT} {report.counts.CORRECT} · {OUTCOME_LABELS.PARTIAL} {report.counts.PARTIAL} · {OUTCOME_LABELS.INCORRECT} {report.counts.INCORRECT} · {OUTCOME_LABELS.UNANSWERED} {report.counts.UNANSWERED}</p>
       {notMarked > 0 && <p className="muted" data-not-marked>{notMarked} of {report.questions} {report.questions === 1 ? "question" : "questions"} {notMarked === 1 ? "was" : "were"} not marked, because {notMarked === 1 ? "it has" : "they have"} no answer key. {notMarked === 1 ? "It does" : "They do"} not count in the score.</p>}
-      <p className="muted">Answers are marked only against the key points an admin wrote for each question; this is a check of those points, not a grade of the whole answer.</p>
+      <p className="muted">The score reflects how many of the rubric points written or approved by an admin your answers covered.</p>
     </section>
     <section aria-labelledby="topics">
       <h2 id="topics">By topic</h2>
@@ -60,6 +68,18 @@ export default async function MockResultsPage({ params }: { params: Promise<{ co
         <p style={{ whiteSpace: "pre-wrap" }}>{question.text}</p>
         <p className="muted">Missed: {question.missedPoints.map(point => `"${point}"`).join("; ")}</p>
         {question.feedback && <p style={{ whiteSpace: "pre-wrap" }}>{question.feedback}</p>}
+        <div id={`feedback-${question.id}`}>
+          {question.aiExplanation ? <>
+            <h3>AI feedback</h3><p style={{ whiteSpace: "pre-wrap" }}>{question.aiExplanation}</p>
+          </> : question.aiFeedbackEligible && <>
+            {notice?.item === question.id && notice.aiError && Object.hasOwn(mockAiFeedbackMessages, notice.aiError)
+              && <p className="notice error" role="alert">{mockAiFeedbackMessages[notice.aiError]}</p>}
+            {aiAvailable && <form action={generateMockAiFeedbackAction.bind(null, courseId, mockExamId, question.id)} className="form">
+              <p className="muted" id={`deepseek-notice-${question.id}`}>Generating an AI explanation sends your answer, the question, and the marking rubric and key points to DeepSeek.</p>
+              <button className="button" type="submit" name="consent" value="deepseek" aria-describedby={`deepseek-notice-${question.id}`}>Generate AI explanation</button>
+            </form>}
+          </>}
+        </div>
       </li>)}</ol> : <p className="muted">{report.marked ? "Nothing: every marked answer covered all its key points." : "Nothing could be marked."}</p>}
     </section>
     {report.notMarked.length > 0 && <section aria-labelledby="not-marked">

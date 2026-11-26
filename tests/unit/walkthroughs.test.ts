@@ -14,7 +14,14 @@ const nav = vi.hoisted(() => ({
   requireUser: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({ db }));
-vi.mock("@/lib/ai-client", () => ai);
+vi.mock("@/lib/ai-client", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/lib/ai-client")>();
+  return {
+    ...ai,
+    runAiPrompt: (prompt: Parameters<typeof actual.runAiPrompt>[0], input: unknown) =>
+      actual.runAiPrompt(prompt, input, {}, ai.chatCompletion),
+  };
+});
 vi.mock("@/lib/logger", () => ({ logError, errorCode: (error: unknown) => (error as { code?: string } | null)?.code }));
 vi.mock("next/navigation", () => ({ redirect: nav.redirect, notFound: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireUser: nav.requireUser, getCurrentUser: vi.fn() }));
@@ -40,7 +47,7 @@ const storedSteps = [
   { title: "Step one", explanation: "Do this.", basis: "method", quote: null, verified: false, unverifiedReason: "method" },
   { title: "Step two", explanation: "Then this.", basis: "question", quote: "three way handshake establishes", verified: true, unverifiedReason: null },
 ];
-const events = () => logError.mock.calls.map(([event, context]) => ({ event, ...context }));
+const events = () => logError.mock.calls.filter(([event]) => event !== "ai_provider_result").map(([event, context]) => ({ event, ...context }));
 const generate = (userId = "student-1", courseId = "course-1", questionId = "q-1") => generateWalkthrough(userId, courseId, questionId);
 
 beforeEach(() => {
@@ -189,6 +196,10 @@ describe("making a walkthrough (US-51)", () => {
 
   it("logs IDs and counts only, never the question, the prompt or the answer", async () => {
     await generate();
+    expect(logError).toHaveBeenCalledWith("ai_provider_result", {
+      feature: "walkthrough", model: "deepseek-flash", promptVersion: WALKTHROUGH_PROMPT_VERSION,
+      durationMs: expect.stringMatching(/^\d+$/), resultCode: "ok",
+    });
     const [generated] = events();
     expect(generated).toEqual({ event: "walkthrough_generated", userId: "student-1", courseId: "course-1", questionId: "q-1", steps: "2", verifiedSteps: "1", durationMs: expect.stringMatching(/^\d+$/) });
     const logged = JSON.stringify(logError.mock.calls);

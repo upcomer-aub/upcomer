@@ -77,6 +77,9 @@ jobs:
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - run: npm run test:e2e -- shared-ai.spec.ts
+        env:
+          UPCOMER_E2E_FAKE_AI: "true"
       - name: Upload the Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

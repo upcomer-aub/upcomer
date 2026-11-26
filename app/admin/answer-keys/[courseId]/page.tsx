@@ -21,6 +21,7 @@ export default async function AnswerKeysPage({ params, searchParams }: {
   const result = await listAnswerKeyGroups(courseId, page);
   return <><Link className="back" href="/admin/questions">← Back to the question bank</Link><span className="eyebrow">Admin · {course.code}</span><h1>Answer Keys</h1>
     <p className="muted">Past papers have no answer keys, so mock exam answers are marked only against the key points you write here. A question without a key is shown to students as not marked. Changing a key does not change exams that were already marked.</p>
+    <p><Link href={`${base}/generated`}>Review generated rubrics</Link></p>
     <p className="muted" data-key-count>{result.withKey} of {result.total} {result.total === 1 ? "question has" : "questions have"} an answer key.</p>
     {saved && <p className="notice" role="status">The answer key was saved.</p>}
     {removed && <p className="notice" role="status">The answer key was removed.</p>}

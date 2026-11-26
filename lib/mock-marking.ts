@@ -1,6 +1,7 @@
 import { MockExamStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { recordLearningEvents } from "@/lib/learning-evidence";
+import { recordLearningEvents, recordMockOutcomes } from "@/lib/learning-evidence";
+import { readGeneratedRubric } from "@/lib/generated-rubric-rules";
 import type { LearningEventInput } from "@/lib/learning-evidence-rules";
 import { errorCode, logError } from "@/lib/logger";
 import { eventCorrect, markAnswer, parseAnswerKey, type AnswerKeyError, type Marking, type MarkOutcomeName } from "@/lib/mock-marking-rules";
@@ -8,14 +9,13 @@ import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
 import { timed } from "@/lib/timing";
 
 // Marking a submitted mock exam (US-49). Each past-paper question is marked against its question group's answer key
-// (AnswerKey, written by an admin), by the rules in lib/mock-marking-rules.ts. A question with no key (no admin wrote one,
-// its group was regrouped away, or a generated practice question, which has no key) is marked NO_KEY: flagged, never
-// guessed, and it records no learning event.
+// (AnswerKey, written by an admin). Generated questions use the approved rubric copied at assembly. A question without
+// a key is marked NO_KEY and records no learning event.
 //
 // The marking is stored on each MockExamQuestion (outcome, the key points covered and missed, the explanation), copied
 // at marking time like the exam's question text, so a later change to an answer key never changes a marked exam. An exam
 // is marked once: the write claims the exam (SUBMITTED and not yet marked), so two tabs or a retry mark it only once.
-// Then each marked past-paper question records a MOCK_EXAM learning event (US-25's contract), so the student's profile
+// Then eligible marked questions record MOCK_EXAM learning events (US-25's contract), so the student's profile
 // and recommendations use the result. Nothing here checks the session: callers pass the session user's ID. Answers and
 // key text are never logged.
 
@@ -47,6 +47,22 @@ async function deliverEvents(userId: string, courseId: string, events: LearningE
   return { recorded, skipped };
 }
 
+type GeneratedMark = { id: string; generatedQuestionId: string | null; outcome: MarkOutcomeName | null };
+async function deliverGeneratedEvents(userId: string, courseId: string, attemptId: string, marks: GeneratedMark[]) {
+  const outcomes = marks.flatMap(item => {
+    const correct = item.outcome ? eventCorrect(item.outcome) : null;
+    return correct === null || !item.generatedQuestionId ? [] : [{ itemId: item.id, generatedQuestionId: item.generatedQuestionId, correct }];
+  });
+  if (!outcomes.length) return { recorded: 0, skipped: 0 };
+  const all = await recordMockOutcomes(userId, courseId, attemptId, outcomes);
+  if (all.ok) return { recorded: all.recorded + all.duplicates, skipped: 0 };
+  let recorded = 0;
+  for (const item of outcomes) {
+    if ((await recordMockOutcomes(userId, courseId, attemptId, [item])).ok) recorded++;
+  }
+  return { recorded, skipped: outcomes.length - recorded };
+}
+
 // Marks the student's submitted exam if it is not marked yet. Safe to call more than once: a marked exam is left as it is
 // (marked: false), and its events are delivered again only as duplicates.
 export async function markMockExam(userId: string, mockExamId: string): Promise<MarkResult> {
@@ -57,26 +73,31 @@ export async function markMockExam(userId: string, mockExamId: string): Promise<
         where: { id: mockExamId, userId },
         select: {
           id: true, courseId: true, status: true, markedAt: true,
-          questions: { orderBy: { position: "asc" }, select: { id: true, position: true, groupId: true, questionId: true, generatedQuestionId: true, answer: true } },
+          questions: { orderBy: { position: "asc" }, select: { id: true, position: true, groupId: true, questionId: true, generatedQuestionId: true, generatedRubricSnapshot: true, outcome: true, answer: true } },
         },
       });
       if (!exam) return { ok: false, error: "not_found" };
       if (exam.status !== MockExamStatus.SUBMITTED) return { ok: false, error: "not_submitted" };
-      if (exam.markedAt) return { ok: true, marked: false, counts: emptyCounts(), eventsRecorded: 0, eventsSkipped: 0 };
+      if (exam.markedAt) {
+        const delivered = await deliverGeneratedEvents(userId, exam.courseId, exam.id, exam.questions);
+        return { ok: true, marked: false, counts: emptyCounts(), eventsRecorded: delivered.recorded, eventsSkipped: delivered.skipped };
+      }
 
-      // Keys only for past-paper questions; a generated question never has one.
+      // Past-paper keys are read at marking. Generated keys were copied when the mock was assembled.
       const groupIds = [...new Set(exam.questions.flatMap(question => (question.groupId && !question.generatedQuestionId ? [question.groupId] : [])))];
       const keys = new Map((groupIds.length
         ? await db.answerKey.findMany({ where: { groupId: { in: groupIds }, courseId: exam.courseId }, select: { groupId: true, keyPoints: true, explanation: true } })
         : []).map(key => [key.groupId, key]));
       const marks = exam.questions.map(question => {
-        const key = question.groupId && !question.generatedQuestionId ? keys.get(question.groupId) ?? null : null;
-        return { question, marking: markAnswer(question.answer, key) satisfies Marking };
+        const generatedKey = readGeneratedRubric(question.generatedRubricSnapshot);
+        const pastKey = !generatedKey && question.groupId && !question.generatedQuestionId ? keys.get(question.groupId) ?? null : null;
+        return { question, marking: markAnswer(question.answer, generatedKey ?? pastKey) satisfies Marking, pastKey };
       });
 
       const now = new Date();
-      const rows = marks.map(({ question, marking }) => ({
+      const rows = marks.map(({ question, marking, pastKey }) => ({
         id: question.id, outcome: marking.outcome, matched: marking.matchedPoints, missed: marking.missedPoints, feedback: marking.feedback,
+        rubric: pastKey ? { keyPoints: pastKey.keyPoints, explanation: pastKey.explanation } : null,
       }));
       const claimed = await db.$transaction(async tx => {
         const claim = await tx.mockExam.updateMany({ where: { id: exam.id, userId, status: MockExamStatus.SUBMITTED, markedAt: null }, data: { markedAt: now } });
@@ -85,8 +106,8 @@ export async function markMockExam(userId: string, mockExamId: string): Promise<
         await tx.$executeRaw`
           UPDATE "MockExamQuestion" AS question
           SET "outcome" = mark.outcome::"MarkOutcome", "matchedPoints" = ARRAY(SELECT jsonb_array_elements_text(mark.matched)),
-              "missedPoints" = ARRAY(SELECT jsonb_array_elements_text(mark.missed)), "feedback" = mark.feedback, "markedAt" = ${now}
-          FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS mark(id text, outcome text, matched jsonb, missed jsonb, feedback text)
+              "missedPoints" = ARRAY(SELECT jsonb_array_elements_text(mark.missed)), "feedback" = mark.feedback, "markingRubric" = mark.rubric, "markedAt" = ${now}
+          FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS mark(id text, outcome text, matched jsonb, missed jsonb, feedback text, rubric jsonb)
           WHERE question."id" = mark.id AND question."mockExamId" = ${exam.id}`;
         return true;
       }, { timeout: 15_000 });
@@ -99,6 +120,7 @@ export async function markMockExam(userId: string, mockExamId: string): Promise<
         const correct = eventCorrect(marking.outcome);
         return correct === null || !question.questionId ? [] : [{ source: "MOCK_EXAM" as const, eventId: mockEventId(exam.id, question.position), questionId: question.questionId, correct }];
       });
+      const generatedMarks = marks.map(({ question, marking }) => ({ ...question, outcome: marking.outcome }));
       let delivered = { recorded: 0, skipped: 0 };
       try {
         delivered = await deliverEvents(userId, exam.courseId, events);
@@ -106,6 +128,14 @@ export async function markMockExam(userId: string, mockExamId: string): Promise<
         // The marking is saved; only the profile update failed. It is logged for an admin; the student still sees the marks.
         logError("mock_exam_marking_evidence_failed", { ...context, errorType: errorType(error) });
         delivered = { recorded: 0, skipped: events.length };
+      }
+      try {
+        const generated = await deliverGeneratedEvents(userId, exam.courseId, exam.id, generatedMarks);
+        delivered.recorded += generated.recorded;
+        delivered.skipped += generated.skipped;
+      } catch (error) {
+        logError("mock_exam_marking_evidence_failed", { ...context, source: "generated", errorType: errorType(error) });
+        delivered.skipped += generatedMarks.filter(item => item.generatedQuestionId && item.outcome !== "NO_KEY").length;
       }
       logError("mock_exam_marked", {
         ...context, courseId: exam.courseId, correct: String(counts.CORRECT), partial: String(counts.PARTIAL), incorrect: String(counts.INCORRECT),

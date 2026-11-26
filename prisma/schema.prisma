@@ -65,6 +65,7 @@ model User {
   questionProgress    QuestionProgress[]
   learningEvents      LearningEvent[]
   generatedQuestions  GeneratedPracticeQuestion[]
+  reviewedRubrics     GeneratedPracticeQuestion[] @relation("GeneratedRubricReviewer")
 
   // Added for US-34: advice a student wrote, and advice an admin removed.
   advice              Advice[]             @relation("AdviceAuthored")
@@ -661,6 +662,12 @@ enum PracticeDifficulty {
 
 // US-44: private generated tasks. Replacing/removing a source deletes these items. Editing source text invalidates
 // its fingerprint so a future mock assembler cannot select stale content. Historical events keep their topic evidence.
+enum GeneratedRubricStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
 model GeneratedPracticeQuestion {
   id String @id @default(cuid())
   userId String
@@ -676,8 +683,13 @@ model GeneratedPracticeQuestion {
   prompt String
   contentHash String
   generatorVersion String
-  // Source exams have no answer keys: do not invent a rubric or an assessed result.
   rubric Json?
+  aiModel String?
+  aiPromptVersion String?
+  rubricStatus GeneratedRubricStatus?
+  reviewedById String?
+  reviewedBy User? @relation("GeneratedRubricReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt DateTime?
   learningEvents LearningEvent[]
   // Added for US-45: mock exam questions copied from this item.
   mockExamQuestions MockExamQuestion[]
@@ -685,6 +697,7 @@ model GeneratedPracticeQuestion {
 
   @@unique([userId, courseId, contentHash])
   @@index([userId, courseId, difficulty])
+  @@index([courseId, rubricStatus, createdAt])
   @@index([sourceQuestionId])
 }
 
@@ -797,18 +810,32 @@ model MockExamQuestion {
   answer       String?
   answeredAt   DateTime?
   // The marking (US-49), copied when the exam is marked, so a later change to the answer key never changes it. NO_KEY:
-  // the question has no answer key (or is a generated question), so it was not marked and recorded no learning event.
+  // the question has no answer key, so it was not marked and recorded no learning event.
   outcome       MarkOutcome?
   matchedPoints String[]     @default([])
   missedPoints  String[]     @default([])
   // Which key points were missed, then the admin's explanation; null when there is nothing to explain.
   feedback      String?
   markedAt      DateTime?
+  generatedRubricSnapshot Json?
+  markingRubric Json?
+  aiExplanations MockAiExplanation[]
 
   @@unique([mockExamId, position])
   @@index([groupId])
   @@index([questionId])
   @@index([generatedQuestionId])
+}
+
+model MockAiExplanation {
+  mockExamQuestionId String
+  mockExamQuestion MockExamQuestion @relation(fields: [mockExamQuestionId], references: [id], onDelete: Cascade)
+  promptVersion String
+  model String
+  explanation String
+  createdAt DateTime @default(now())
+
+  @@id([mockExamQuestionId, promptVersion])
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

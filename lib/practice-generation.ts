@@ -4,26 +4,18 @@ import { PUBLISHED_FILES } from "@/lib/file-visibility";
 import { topicKey } from "@/lib/learning-profile";
 import { logError } from "@/lib/logger";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
-import { contentHash, difficulties, GENERATOR_VERSION, groundedPrompts, sourceFingerprint, type GenerationError, type GenerationSettings } from "@/lib/practice-generation-rules";
+import { contentHash, GENERATOR_VERSION, groundedPrompts, sourceFingerprint, validGenerationSettings, type GenerationError, type GenerationSettings } from "@/lib/practice-generation-rules";
+import { hasCurrentPracticeSource } from "@/lib/practice-source";
 
 class GenerationRefusal extends Error {
   constructor(public reason: GenerationError) { super(reason); }
 }
 
-type Provenance = {
-  sourceFingerprint: string; topicKey: string;
-  sourceQuestion: { text: string; excludedFromBank?: boolean; groupId?: string | null; file: { courseId: string; category: string; status: string; topic: string | null } };
-};
-const hasCurrentSource = (item: Provenance, courseId: string) =>
-  isUsableQuestion(item.sourceQuestion) && item.sourceQuestion.groupId !== null && item.sourceQuestion.file.courseId === courseId && item.sourceQuestion.file.category === "EXAM"
-  && item.sourceQuestion.file.status === "PUBLISHED" && item.sourceFingerprint === sourceFingerprint(item.sourceQuestion.text)
-  && item.topicKey === topicKey(item.sourceQuestion.file.topic);
 
 // US-44. Persisted item IDs and provenance are the input contract for US-45 mock assembly. No new tasks are inserted
 // into the historical Question/QuestionGroup tables, so generation never changes exam-frequency statistics.
 export async function generatePracticeQuestions(userId: string, courseId: string, settings: GenerationSettings) {
-  if (!Number.isInteger(settings.count) || settings.count < 1 || settings.count > 10 || !difficulties.includes(settings.difficulty)
-    || (settings.topicKey?.length ?? 0) > 100) return { ok: false as const, error: "invalid_settings" as GenerationError };
+  if (!validGenerationSettings(settings)) return { ok: false as const, error: "invalid_settings" as GenerationError };
   if (!checkRateLimit(`generate-practice:${userId}`, limitFromEnv("PRACTICE_GENERATION_RATE_LIMIT_PER_MINUTE", 20), 60_000).ok) {
     logError("practice_generation_refused", { userId, courseId, reason: "rate_limited" });
     return { ok: false as const, error: "rate_limited" as GenerationError };
@@ -43,13 +35,13 @@ export async function generatePracticeQuestions(userId: string, courseId: string
       const existing = await tx.generatedPracticeQuestion.findMany({
         where: { userId, courseId }, include: { sourceQuestion: { select: { text: true, excludedFromBank: true, groupId: true, file: { select: { courseId: true, category: true, status: true, topic: true } } } } },
       });
-      const stale = existing.filter(item => !hasCurrentSource(item, courseId));
+      const stale = new Set(existing.filter(item => !item.aiPromptVersion && !hasCurrentPracticeSource(item, courseId)).map(item => item.id));
       // Invalidated items are no longer usable by mocks. Free their unique hashes before regenerating an identical
       // task under corrected topic metadata; event snapshots survive with a null generatedQuestionId.
-      if (stale.length) await tx.generatedPracticeQuestion.deleteMany({ where: { userId, courseId, id: { in: stale.map(item => item.id) } } });
+      if (stale.size) await tx.generatedPracticeQuestion.deleteMany({ where: { userId, courseId, id: { in: [...stale] } } });
       const seen = new Set([
         ...sources.map(source => contentHash(source.text)),
-        ...existing.filter(item => hasCurrentSource(item, courseId)).map(item => item.contentHash),
+        ...existing.filter(item => !stale.has(item.id)).map(item => item.contentHash),
       ]);
       const selected: Array<{ source: typeof eligible[number]; prompt: string; hash: string }> = [];
       // Round-robin tasks across papers before taking a second task from the same source.
@@ -90,7 +82,7 @@ export async function getGeneratedPracticeQuestions(userId: string, courseId: st
       include: { sourceQuestion: { select: { text: true, excludedFromBank: true, groupId: true, fileId: true, file: { select: { title: true, topic: true, courseId: true, category: true, status: true } } } } },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     });
-    return questions.filter(item => hasCurrentSource(item, courseId));
+    return questions.filter(item => hasCurrentPracticeSource(item, courseId));
   } catch (error) {
     logError("practice_generation_failed", { userId, courseId, operation: "read", errorType: error instanceof Error ? error.name : "Unknown" });
     throw error;

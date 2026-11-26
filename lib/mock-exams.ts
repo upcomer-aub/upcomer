@@ -9,9 +9,11 @@ import {
   type GeneratedCandidate, type MockExamError, type MockExamOptions, type PoolQuestion, type SittingError,
 } from "@/lib/mock-exam-rules";
 import { selectMockQuestions } from "@/lib/mock-exam-mix";
+import { MOCK_AI_FEEDBACK_VERSION } from "@/lib/mock-ai-feedback-rules";
 import { finishesNow, isExpired, oldestOpenDeadline, timeLeftMs } from "@/lib/mock-exam-timing";
 import { excludedIds, type AvoidSet } from "@/lib/mock-exam-version-rules";
 import { getGeneratedPracticeQuestions } from "@/lib/practice-generation";
+import { readGeneratedRubric } from "@/lib/generated-rubric-rules";
 import { courseExams } from "@/lib/question-bank";
 import { checkRateLimit, limitFromEnv } from "@/lib/rate-limit";
 
@@ -58,10 +60,13 @@ type SourcedCandidate = GeneratedCandidate & { sourceQuestionId: string };
 const withoutSource = ({ sourceQuestionId, ...item }: SourcedCandidate): GeneratedCandidate => (void sourceQuestionId, item);
 async function generatedCandidates(userId: string, courseId: string): Promise<SourcedCandidate[]> {
   const items = await getGeneratedPracticeQuestions(userId, courseId);
-  return items.map(item => ({
-    id: item.id, topicKey: item.topicKey, topic: item.topic, difficulty: item.difficulty, text: item.prompt, sourcePaper: item.sourceQuestion.file.title,
-    sourceQuestionId: item.sourceQuestionId,
-  }));
+  return items.map(item => {
+    const approvedRubric = item.rubricStatus === "APPROVED" ? readGeneratedRubric(item.rubric) : null;
+    return {
+      id: item.id, topicKey: item.topicKey, topic: item.topic, difficulty: item.difficulty, text: item.prompt, sourcePaper: item.sourceQuestion.file.title,
+      sourceQuestionId: item.sourceQuestionId, ...(approvedRubric && { approvedRubric }),
+    };
+  });
 }
 
 // Each generated question's source question's group in the pool, by its paper count (US-47 ranks generated questions by
@@ -173,6 +178,7 @@ export async function createMockExam(userId: string, input: CreateMockExamInput,
             ...selected.generated.map((item, index) => ({
               position: selected.questions.length + index + 1, generatedQuestionId: item.id, topicKey: item.topicKey, topic: item.topic, text: item.text,
               paperCount: 0, totalPapers: pool[0].totalPapers, sourcePapers: [item.sourcePaper],
+              ...(item.approvedRubric && { generatedRubricSnapshot: item.approvedRubric }),
             })),
           ],
         },
@@ -222,7 +228,7 @@ export async function finalizeExpiredMockExams(
 // so the answer never says whether an ID exists. An exam whose time ran out is submitted first.
 // `locked`: a timed exam that was not started yet. Its questions are left out here, on the server, so nothing can show
 // them before the clock runs. `remainingMs`: the server's time left on a running timed exam, otherwise null.
-export async function getMockExam(userId: string, mockExamId: string) {
+export async function getMockExam(userId: string, mockExamId: string, includeAiExplanations = false) {
   try {
     const now = new Date();
     await finalizeExpiredMockExams({ userId, mockExamId }, "read", now);
@@ -237,6 +243,7 @@ export async function getMockExam(userId: string, mockExamId: string) {
           select: {
             id: true, position: true, topic: true, text: true, paperCount: true, totalPapers: true, sourcePapers: true, answer: true,
             outcome: true, matchedPoints: true, missedPoints: true, feedback: true,
+            ...(includeAiExplanations && { aiExplanations: { where: { promptVersion: MOCK_AI_FEEDBACK_VERSION }, select: { explanation: true } } }),
             // US-51: the past-paper source question, for the walkthrough link once the exam is submitted (null for generated).
             questionId: true,
           },

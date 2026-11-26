@@ -1,4 +1,4 @@
-import type { AiMessage } from "@/lib/ai-client";
+import type { AiMessage, AiPrompt } from "@/lib/ai-client";
 
 // US-51 (Lea Tass): step-by-step walkthroughs of past-exam questions. Pure rules shared by the service, the action and the
 // page: the prompt, the strict parsing of the model's answer, the grounding check, and the messages.
@@ -88,6 +88,16 @@ export function walkthroughMessages(input: WalkthroughInput): AiMessage[] {
 // of exactly the four string fields, every field within its length. Anything else is refused as a whole; nothing is
 // repaired, cut short or partly kept, so an answer is either fully valid or not stored at all.
 // ---------------------------------------------------------------------------------------------------------------------
+
+export const walkthroughPrompt: AiPrompt<WalkthroughInput, WalkthroughStep[]> = {
+  feature: "walkthrough",
+  version: WALKTHROUGH_PROMPT_VERSION,
+  messages: walkthroughMessages,
+  validate: (content, input) => {
+    const parsed = parseWalkthrough(content, input.question);
+    return parsed.ok ? { ok: true, value: parsed.steps } : parsed;
+  },
+};
 
 export type ParseError = "too_long" | "not_json" | "invalid_shape" | "step_count" | "field_empty" | "field_too_long";
 export type ParseResult = { ok: true; steps: WalkthroughStep[] } | { ok: false; error: ParseError };

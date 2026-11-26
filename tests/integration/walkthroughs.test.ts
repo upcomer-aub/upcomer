@@ -9,7 +9,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 // with a unique suffix and deleted in afterAll.
 
 const ai = vi.hoisted(() => ({ chatCompletion: vi.fn(), isAiConfigured: vi.fn(() => true) }));
-vi.mock("@/lib/ai-client", () => ai);
+vi.mock("@/lib/ai-client", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/lib/ai-client")>();
+  return {
+    ...ai,
+    runAiPrompt: (prompt: Parameters<typeof actual.runAiPrompt>[0], input: unknown) =>
+      actual.runAiPrompt(prompt, input, {}, ai.chatCompletion),
+  };
+});
 
 import { getConsolidatedExam } from "@/lib/consolidated-exam";
 import { db } from "@/lib/db";
